@@ -1,0 +1,17 @@
+[build-system]
+requires = ["scikit-build-core", "pybind11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "soma"
+version = "0.0.0"
+authors = [{name = "Ludwig Schneider", email = "ludwigschneider@uchicago.edu"}]
+dependencies = []
+description = "C++/GPU accelerated code for polymer multi-block systems. This is a refactoring of SOMA https://doi.org/10.1016/j.cpc.2018.08.011."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+urls = {homepage = "https://github.com/InnocentBug/SOMA2"}
+
+[project.optional-dependencies]
+test = ["pytest"]
