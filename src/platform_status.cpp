@@ -15,14 +15,18 @@
 // License along with this library; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301
 // USA
-
+#include <thread>
 #include "platform_status.h"
 #include "platform_status.cuh"
 
+#include "logger.h"
+
 void printPlatformInfo() {
+  Logger& logger = Logger::getInstance();
 #ifdef ENABLE_CUDA
   cudaPrintPlatformInfo();
 #else //ENABLE_CUDA
-
+  const unsigned int cores = std::thread::hardware_concurrency();
+  logger.log(Logger::INFO, "CPU platform. "+std::to_string(cores)+" parallel core available.");
 #endif//ENABLE_CUDA
 }
