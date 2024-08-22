@@ -16,7 +16,10 @@ runtimes:
     - python@3.10.8
 # This is the section where you manage your linters. (https://docs.trunk.io/check/configuration)
 lint:
+  disabled:
+    - clang-tidy
   enabled:
+    - clang-format@16.0.3
     - bandit@1.7.9
     - black@24.8.0
     - isort@5.13.2
