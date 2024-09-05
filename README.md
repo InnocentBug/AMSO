@@ -1,3 +1,3 @@
-# SOMA version 2
+# MOSA: Modular sOma for Self-Assembly
 
-This is a refactor of SOMA
+This is a redesign of [SOMA](https://gitlab.com/InnocentBug/SOMA).
