@@ -1,4 +1,4 @@
-// SOMA version 2, accelerated Monte-Carlo for many particles in interacting
+// AMSO, accelerated Monte-Carlo for many particles in interacting
 // fields Copyright (C) 2024 Ludwig Schneider
 
 // This library is free software; you can redistribute it and/or

@@ -1,4 +1,4 @@
-// SOMA version 2, accelerated Monte-Carlo for many particles in interacting
+// AMSO version 2, accelerated Monte-Carlo for many particles in interacting
 // fields Copyright (C) 2024 Ludwig Schneider
 
 // This library is free software; you can redistribute it and/or
@@ -23,7 +23,7 @@ Logger::Logger(const std::string &filename = "") : useFile(false) {
 }
 
 void Logger::updateFile(const std::string &filename) {
-  std::string end_msg = "SOMA stops logging in this stream and will log into ";
+  std::string end_msg = "AMSO stops logging in this stream and will log into ";
   if (filename.empty()) {
     end_msg += "standard error stream now.";
   } else {
@@ -41,9 +41,9 @@ void Logger::updateFile(const std::string &filename) {
     if (!logFile.is_open()) {
       throw std::runtime_error("Unable to open log file");
     }
-    log(Logger::INFO, "SOMA starts logging into file " + filename);
+    log(Logger::INFO, "AMSO starts logging into file " + filename);
   } else {
-    log(Logger::INFO, "SOMA starts logging into standard error stream.");
+    log(Logger::INFO, "AMSO starts logging into standard error stream.");
   }
 }
 

@@ -1,20 +1,34 @@
 # Add your source files
-set(_soma_cpu_sources platform_status.cpp logger.cpp)
+set(_amso_cpu_sources platform_status.cpp logger.cpp)
+
+# Define the target first
+add_library(amso_core ${_amso_cpu_sources})
 
 if(ENABLE_CUDA)
-  set(_soma_cuda_sources platform_status.cu)
-  set_target_properties(soma_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+  set(_amso_cuda_sources platform_status.cu)
+
   # Link against CUDA if needed
-  target_link_libraries(soma_core CUDA::cudart)
-  target_link_libraries(soma_core CUDA::cuda_driver)
-  set_source_files_properties(${_soma_cuda_sources} PROPERTIES LANGUAGE CUDA)
-  set(_soma_sources ${_soma_cpu_sources} ${_soma_cuda_sources})
-else(ENABLE_CUDA)
-  set(_soma_sources ${_soma_cpu_sources})
-endif(ENABLE_CUDA)
+  target_link_libraries(amso_core CUDA::cudart # Link against the CUDA runtime
+                        CUDA::cuda_driver)
 
-add_library(soma_core STATIC ${_soma_sources})
-set_target_properties(soma_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  # CUDA specific settings
+  set_target_properties(amso_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
+  set_target_properties(amso_core PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
+  # Set CUDA language for the source files
+  set_source_files_properties(${_amso_cuda_sources} PROPERTIES LANGUAGE CUDA)
 
-target_include_directories(soma_core
+  # Add the CUDA sources to the target sources
+  set(_amso_sources ${_amso_cpu_sources} ${_amso_cuda_sources})
+else()
+  set(_amso_sources ${_amso_cpu_sources})
+endif()
+
+# Update target sources
+target_sources(amso_core PRIVATE ${_amso_sources})
+
+# Set properties
+set_target_properties(amso_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# Include directories
+target_include_directories(amso_core
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)

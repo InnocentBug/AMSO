@@ -1,9 +1,9 @@
 [build-system]
-requires = ["scikit-build-core", "pybind11"]
+requires = ["scikit-build-core", "pybind11", "cmake", "setuptools"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "soma"
+name = "amso"
 version = "0.0.0"
 authors = [
   { name = "Ludwig Schneider", email = "ludwigschneider@uchicago.edu" },
@@ -13,7 +13,10 @@ description = "C++/GPU accelerated code for polymer multi-block systems. This is
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-urls = { homepage = "https://github.com/InnocentBug/SOMA2" }
+urls = { homepage = "https://github.com/InnocentBug/AMSO" }
 
 [project.optional-dependencies]
 test = ["pytest"]
+
+[tool.scikit-build]
+cmake.define = { "ENABLE_CUDA" = "ON" }

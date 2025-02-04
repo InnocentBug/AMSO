@@ -1,5 +1,6 @@
 #include "platform_status.cuh"
 #include <cuda.h>
+#include <iostream>
 #include <stdio.h>
 
 __global__ void cuda_kernel() {
@@ -9,5 +10,6 @@ __global__ void cuda_kernel() {
 
 void cudaPrintPlatformInfo() {
   cuda_kernel<<<1, 1>>>();
+  std::cout << __FILE__ << std::endl;
   cudaDeviceSynchronize();
 }

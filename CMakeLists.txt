@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.25)
 option(ENABLE_CUDA "Enable compilation with CUDA for GPU acceleration"
        $ENV{ENABLE_CUDA})
 
@@ -41,9 +41,9 @@ if(ENABLE_CUDA)
   include(CheckLanguage)
   check_language(CUDA)
   if(CMAKE_CUDA_COMPILER)
-
     enable_language(CUDA)
-    find_package(CUDAToolkit 12.0 REQUIRED)
+    find_package(CUDAToolkit 12.0 REQUIRED CUDA::cudart CUDA::curand)
+
   else(CMAKE_CUDA_COMPILER)
     message(STATUS "No CUDA compiler found")
   endif(CMAKE_CUDA_COMPILER)

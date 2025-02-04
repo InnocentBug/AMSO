@@ -1,4 +1,4 @@
-// SOMA version 2, accelerated Monte-Carlo for many particles in interacting
+// AMSO, accelerated Monte-Carlo for many particles in interacting
 // fields Copyright (C) 2024 Ludwig Schneider
 
 // This library is free software; you can redistribute it and/or
@@ -24,6 +24,7 @@
 void printPlatformInfo() {
   Logger &logger = Logger::getInstance();
 #ifdef ENABLE_CUDA
+  logger.log(Logger::INFO, "GPU platform.");
   cudaPrintPlatformInfo();
 #else  // ENABLE_CUDA
   const unsigned int cores = std::thread::hardware_concurrency();

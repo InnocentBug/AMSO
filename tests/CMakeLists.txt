@@ -13,7 +13,7 @@ foreach(test_source ${test_sources})
   add_executable(${test_name} ${test_source})
 
   # Link the test executable with necessary libraries
-  target_link_libraries(${test_name} PRIVATE soma_core gtest gtest_main)
+  target_link_libraries(${test_name} PRIVATE amso_core gtest gtest_main)
 
   # Register the test with CTest
   add_test(NAME ${test_name} COMMAND ${test_name})
