@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
+
 option(ENABLE_CUDA "Enable compilation with CUDA for GPU acceleration"
        $ENV{ENABLE_CUDA})
 

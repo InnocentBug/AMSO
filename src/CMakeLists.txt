@@ -32,3 +32,7 @@ set_target_properties(amso_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # Include directories
 target_include_directories(amso_core
                            PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)
+
+# DLPACK
+cpmaddpackage(NAME dlpack GITHUB_REPOSITORY dmlc/dlpack GIT_TAG main)
+target_include_directories(amso_core PUBLIC ${dlpack_SOURCE_DIR}/include/)
