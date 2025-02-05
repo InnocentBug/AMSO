@@ -1,0 +1,207 @@
+#include <array>
+
+#include <cuda_runtime.h>
+#include <dlpack/dlpack.h>
+#include <pybind11/cast.h>
+#include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
+#include <thrust/copy.h>
+#include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/host_vector.h>
+
+#pragma once
+
+namespace amso {
+
+namespace detail {
+template <typename T> struct TypeToDLPackCode {
+  static constexpr DLDataTypeCode code = kDLOpaqueHandle;
+  static constexpr uint8_t bits = 8 * sizeof(T);
+  static constexpr uint8_t lanes = 1;
+};
+
+template <> struct TypeToDLPackCode<int32_t> {
+  static constexpr DLDataTypeCode code = kDLInt;
+  static constexpr uint8_t bits = 8 * sizeof(int32_t);
+  static constexpr uint8_t lanes = 1;
+};
+template <> struct TypeToDLPackCode<int64_t> {
+  static constexpr DLDataTypeCode code = kDLInt;
+  static constexpr uint8_t bits = 8 * sizeof(int64_t);
+  static constexpr uint8_t lanes = 1;
+};
+template <> struct TypeToDLPackCode<float> {
+  static constexpr DLDataTypeCode code = kDLFloat;
+  static constexpr uint8_t bits = 8 * sizeof(float);
+  static constexpr uint8_t lanes = 1;
+};
+template <> struct TypeToDLPackCode<double> {
+  static constexpr DLDataTypeCode code = kDLFloat;
+  static constexpr uint8_t bits = 8 * sizeof(double);
+  static constexpr uint8_t lanes = 1;
+};
+
+}; // namespace detail
+
+template <typename T, int ndim> class MemArray {
+private:
+  using dlmt_t = DLManagedTensor;
+
+  thrust::host_vector<T> host_vec; // Pinned memory
+  thrust::device_vector<T> device_vec;
+
+  std::array<int64_t, ndim> shape;
+  int64_t size;
+
+  bool on_device;
+  int device_id;
+  int lock_count; // Context manager locks
+
+private:
+public:
+  MemArray(const std::array<int64_t, ndim> &shape_, int device_id_)
+      : shape({0}), size(0), on_device(false), device_id(device_id_),
+        lock_count(0) {
+
+    for (auto shape_element : shape_) {
+      if (shape_element <= 0) {
+        std::string msg = "Invalid shape argument, all shapes have to be "
+                          "bigger then 0 but got < ";
+        for (auto invalid_shape : shape)
+          msg += std::to_string(invalid_shape) + " ";
+        msg += "> where " + std::to_string(shape_element) + " is invalid";
+        throw std::invalid_argument(msg);
+      }
+
+      size = 1;
+      for (auto shape_element : shape_)
+        size *= shape_element;
+
+      host_vec = thrust::host_vector<T>(size);
+      shape = shape_;
+    }
+  }
+
+  pybind11::capsule get_dlpack_tensor() {
+    if (lock_count == 0)
+      throw std::runtime_error("Accessing memory without active context.");
+
+    T *data_ptr = on_device ? thrust::raw_pointer_cast(device_vec.data())
+                            : host_vec.data();
+
+    dlmt_t *tensor = new dlmt_t();
+
+    // tensor->version = DLPackVersion{DLPACK_MAJOR_VERSION,
+    // DLPACK_MINOR_VERSION};
+    tensor->manager_ctx = this;
+    tensor->deleter = [](dlmt_t *self) {
+      // auto* wrapper = static_cast<MemArray<T,ndim>*>(self->manager_ctx);
+    };
+
+    tensor->dl_tensor.data = data_ptr;
+    DLDevice device;
+    device.device_id = device_id;
+    if (on_device)
+      device.device_type = DLDeviceType::kDLCUDA;
+    else {
+      device.device_id = 0;
+      device.device_type = DLDeviceType::kDLCPU;
+    }
+    tensor->dl_tensor.device = device;
+    tensor->dl_tensor.ndim = ndim;
+    tensor->dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
+                                         detail::TypeToDLPackCode<T>::bits,
+                                         detail::TypeToDLPackCode<T>::lanes};
+    tensor->dl_tensor.shape = shape.data();
+    tensor->dl_tensor.strides = nullptr;
+    tensor->dl_tensor.byte_offset = 0;
+
+    pybind11::capsule capsule =
+        pybind11::capsule(tensor, "dltensor", [](PyObject *obj) {
+          void *ptr = PyCapsule_GetPointer(obj, "used_dltensor");
+          if (ptr) {
+            dlmt_t *dlmt = static_cast<dlmt_t *>(ptr);
+            if (dlmt->deleter)
+              dlmt->deleter(dlmt);
+          }
+        });
+
+    return capsule;
+  }
+
+  // Context manager methods
+  void enter() { lock_count++; }
+  void exit() { lock_count--; }
+
+  void to_device() {
+    if (on_device)
+      return;
+
+    if (lock_count > 0)
+      throw std::runtime_error("Cannot move memory while locked to device");
+
+    cudaSetDevice(device_id);
+    // thrust::copy_n(thrust::device, host_vec.begin(), size,
+    // device_vec.begin());
+    device_vec = host_vec;
+    on_device = true;
+  }
+
+  void to_host() {
+    if (not on_device)
+      return;
+
+    if (lock_count > 0)
+      throw std::runtime_error("Cannot move memory while locked to host");
+
+    cudaSetDevice(device_id);
+    // thrust::copy_n(thrust::device, device_vec.begin(), size,
+    // host_vec.begin());
+    host_vec = device_vec;
+    on_device = false;
+  }
+
+  int get_lock_count() { return lock_count; }
+
+  void read_numpy_array(pybind11::array_t<T, pybind11::array::c_style |
+                                                 pybind11::array::forcecast>
+                            np_array) {
+    to_host();
+    pybind11::buffer_info buf = np_array.request();
+
+    if (buf.ndim != ndim)
+      throw std::invalid_argument("Input array has " +
+                                  std::to_string(buf.ndim) +
+                                  " dimensions, but target memarray has " +
+                                  std::to_string(ndim) + " dimensions.");
+
+    for (auto i = 0; i < ndim; ++i) {
+      if (buf.shape[i] != shape[i]) {
+        throw std::invalid_argument(
+            "Input array has incompatible shapes at pos " + std::to_string(i) +
+            " input has " + std::to_string(buf.shape[i]) + " MemArray has " +
+            std::to_string(shape[i]) + ".");
+      }
+    }
+
+    thrust::copy_n(thrust::host, static_cast<T *>(buf.ptr), size,
+                   host_vec.begin());
+  }
+};
+
+template <typename T, int ndim>
+void bind_mem_array(pybind11::module &m, std::string python_name) {
+  pybind11::class_<MemArray<T, ndim>>(m, python_name.c_str())
+      .def(pybind11::init<const std::array<int64_t, ndim> &, int>())
+
+      .def("_enter", &MemArray<T, ndim>::enter)
+      .def("_exit", &MemArray<T, ndim>::exit)
+      .def("_to_device", &MemArray<T, ndim>::to_device)
+      .def("_to_host", &MemArray<T, ndim>::to_host)
+      .def("_dlpack", &MemArray<T, ndim>::get_dlpack_tensor)
+      .def("_read_numpy_array", &MemArray<T, ndim>::read_numpy_array);
+}
+
+} // namespace amso
