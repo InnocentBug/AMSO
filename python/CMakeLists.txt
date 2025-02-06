@@ -16,7 +16,3 @@ target_link_libraries(_amso PUBLIC amso_core pybind11::module Python::Python)
 
 # Install the compiled Python module
 install(TARGETS _amso LIBRARY DESTINATION amso)
-install(TARGETS amso_core LIBRARY DESTINATION amso)
-
-# Install the pure Python files
-install(DIRECTORY amso/ DESTINATION amso)
