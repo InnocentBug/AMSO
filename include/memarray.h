@@ -15,6 +15,8 @@
 
 namespace amso {
 
+template <typename T, int ndim> class MemArray; // Forward Declaration
+
 namespace detail {
 template <typename T> struct TypeToDLPackCode {
   static constexpr DLDataTypeCode code = kDLOpaqueHandle;
@@ -43,9 +45,9 @@ template <> struct TypeToDLPackCode<double> {
   static constexpr uint8_t lanes = 1;
 };
 
-template <typename tensor_ptr_type>
+template <typename tensor_ptr_type, typename T, int ndim>
 void dl_tensor_deleter(tensor_ptr_type self) {
-  // auto* wrapper = static_cast<MemArray<T,ndim>*>(self->manager_ctx);
+  auto *wrapper = static_cast<MemArray<T, ndim> *>(self->manager_ctx);
 
   delete[] self->dl_tensor.shape;
   delete[] self->dl_tensor.strides;
@@ -83,9 +85,22 @@ private:
 
   bool on_device;
   int device_id;
+
   int lock_count; // Context manager locks
 
+  // Keeping track of dlpack capsule to see if they have been released
+  std::map<int64_t *, bool> dlpack_capsule_lock;
+
 private:
+  bool all_dlpack_capsules_unlocked() {
+    for (auto iter : dlpack_capsule_lock) {
+      if (iter.second)
+        return false;
+      std::cout << "test: " << iter.first << " " << iter.second << std::endl;
+    }
+    return true;
+  }
+
 public:
   MemArray(const std::array<int64_t, ndim> &shape_, int device_id_)
       : shape({0}), size(0), on_device(false), device_id(device_id_),
@@ -122,6 +137,7 @@ public:
     dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
     std::copy(shape.begin(), shape.end(),
               dl_tensor.shape); // Init with correct shape
+
     auto device_pair = get_dlpack_device();
     dl_tensor.device.device_type = device_pair.first;
     dl_tensor.device.device_id = device_pair.second;
@@ -139,7 +155,7 @@ public:
           DLPackVersion{DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
       versioned_tensor->manager_ctx = this;
       versioned_tensor->deleter =
-          &detail::dl_tensor_deleter<DLManagedTensorVersioned *>;
+          &detail::dl_tensor_deleter<DLManagedTensorVersioned *, T, ndim>;
       versioned_tensor->flags = 0;
       versioned_tensor->dl_tensor = dl_tensor;
 
@@ -152,7 +168,7 @@ public:
       auto tensor = std::make_unique<DLManagedTensor>();
       tensor->dl_tensor = dl_tensor;
       tensor->manager_ctx = this;
-      tensor->deleter = &detail::dl_tensor_deleter<DLManagedTensor *>;
+      tensor->deleter = &detail::dl_tensor_deleter<DLManagedTensor *, T, ndim>;
 
       // Release unique pointer to capsule, as we transfer ownership to the
       // python capsule.
