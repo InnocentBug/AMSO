@@ -117,21 +117,12 @@ public:
     T *data_ptr = on_device ? thrust::raw_pointer_cast(device_vec.data())
                             : host_vec.data();
 
-    DLDevice device;
-    device.device_id = device_id;
-    if (on_device)
-      device.device_type = DLDeviceType::kDLCUDA;
-    else {
-      device.device_id = 0;
-      device.device_type = DLDeviceType::kDLCPU;
-    }
-
     DLTensor dl_tensor;
     dl_tensor.data = data_ptr;
     dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
     std::copy(shape.begin(), shape.end(),
               dl_tensor.shape); // Init with correct shape
-    dl_tensor.device = device;
+    dl_tensor.device = get_dlpack_device();
     dl_tensor.ndim = ndim;
     dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
                                  detail::TypeToDLPackCode<T>::bits,
@@ -166,6 +157,18 @@ public:
       return pybind11::capsule(tensor.release(), "dltensor",
                                &detail::dl_capsule_deleter<DLManagedTensor *>);
     }
+  }
+
+  DLDevice get_dlpack_device() {
+    DLDevice device;
+    device.device_id = device_id;
+    if (on_device)
+      device.device_type = DLDeviceType::kDLCUDA;
+    else {
+      device.device_id = 0;
+      device.device_type = DLDeviceType::kDLCPU;
+    }
+    return device;
   }
 
   // Context manager methods
@@ -238,7 +241,8 @@ void bind_mem_array(pybind11::module &m, std::string python_name) {
       .def("_to_device", &MemArray<T, ndim>::to_device)
       .def("_to_host", &MemArray<T, ndim>::to_host)
       .def("_dlpack", &MemArray<T, ndim>::get_dlpack_tensor)
-      .def("_read_numpy_array", &MemArray<T, ndim>::read_numpy_array);
+      .def("_read_numpy_array", &MemArray<T, ndim>::read_numpy_array)
+      .def("_dlpack_device", &MemArray<T, ndim>::get_dlpack_device);
 }
 
 } // namespace amso
