@@ -1,11 +1,11 @@
 # Add your source files
-set(_amso_cpu_sources platform_status.cpp logger.cpp)
+set(_amso_cpu_sources dummy.cpp)
 
 # Define the target first
 add_library(amso_core ${_amso_cpu_sources})
 
 if(ENABLE_CUDA)
-  set(_amso_cuda_sources platform_status.cu)
+  set(_amso_cuda_sources dummy.cu)
 
   # Link against CUDA if needed
   target_link_libraries(amso_core CUDA::cudart # Link against the CUDA runtime

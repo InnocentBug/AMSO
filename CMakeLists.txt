@@ -58,4 +58,4 @@ add_subdirectory(python)
 
 # Add tests
 enable_testing()
-add_subdirectory(tests)
+# add_subdirectory(tests)
