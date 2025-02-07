@@ -35,7 +35,11 @@ class MemArray:
             dl_device: tuple | None = None,
             copy: bool | None = None,
         ):
-            dlpack = self._cpp_memarray._dlpack()
+            if max_version[0] > 1:
+                dlpack = self._cpp_memarray._dlpack(True)
+            else:
+                dlpack = self._cpp_memarray._dlpack(False)
+
             return dlpack
 
     # On the C++ side we instanciate only certain types from the template.

@@ -43,12 +43,38 @@ template <> struct TypeToDLPackCode<double> {
   static constexpr uint8_t lanes = 1;
 };
 
+template <typename tensor_ptr_type>
+void dl_tensor_deleter(tensor_ptr_type self) {
+  // auto* wrapper = static_cast<MemArray<T,ndim>*>(self->manager_ctx);
+
+  delete[] self->dl_tensor.shape;
+  delete[] self->dl_tensor.strides;
+  // Invalidate tensor
+  self->dl_tensor.data = nullptr;
+  self->dl_tensor.ndim = 0;
+  self->dl_tensor.shape = nullptr;
+  self->dl_tensor.strides = nullptr;
+  self->dl_tensor.byte_offset = 0;
+}
+template <typename tensor_ptr_type> void dl_capsule_deleter(PyObject *capsule) {
+  void *raw_ptr = nullptr;
+  // Can be original name if unused "dltensor"
+  if (strcmp("dltensor", PyCapsule_GetName(capsule)) == 0)
+    raw_ptr = PyCapsule_GetPointer(capsule, "dltensor");
+  else // "used_dltensor if capsule is consumed
+    raw_ptr = PyCapsule_GetPointer(capsule, "used_dltensor");
+
+  if (raw_ptr) // Unknown capsule or already freed capsule
+  {
+    tensor_ptr_type tensor_ptr = static_cast<tensor_ptr_type>(raw_ptr);
+    if (tensor_ptr->deleter) // Execute custom deleter, here delete[] shape.
+      tensor_ptr->deleter(tensor_ptr);
+  }
+}
 }; // namespace detail
 
 template <typename T, int ndim> class MemArray {
 private:
-  using dlmt_t = DLManagedTensor;
-
   thrust::host_vector<T> host_vec; // Pinned memory
   thrust::device_vector<T> device_vec;
 
@@ -84,23 +110,13 @@ public:
     }
   }
 
-  pybind11::capsule get_dlpack_tensor() {
+  pybind11::capsule get_dlpack_tensor(bool versioned) {
     if (lock_count == 0)
       throw std::runtime_error("Accessing memory without active context.");
 
     T *data_ptr = on_device ? thrust::raw_pointer_cast(device_vec.data())
                             : host_vec.data();
 
-    dlmt_t *tensor = new dlmt_t();
-
-    // tensor->version = DLPackVersion{DLPACK_MAJOR_VERSION,
-    // DLPACK_MINOR_VERSION};
-    tensor->manager_ctx = this;
-    tensor->deleter = [](dlmt_t *self) {
-      // auto* wrapper = static_cast<MemArray<T,ndim>*>(self->manager_ctx);
-    };
-
-    tensor->dl_tensor.data = data_ptr;
     DLDevice device;
     device.device_id = device_id;
     if (on_device)
@@ -109,26 +125,47 @@ public:
       device.device_id = 0;
       device.device_type = DLDeviceType::kDLCPU;
     }
-    tensor->dl_tensor.device = device;
-    tensor->dl_tensor.ndim = ndim;
-    tensor->dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
-                                         detail::TypeToDLPackCode<T>::bits,
-                                         detail::TypeToDLPackCode<T>::lanes};
-    tensor->dl_tensor.shape = shape.data();
-    tensor->dl_tensor.strides = nullptr;
-    tensor->dl_tensor.byte_offset = 0;
 
-    pybind11::capsule capsule =
-        pybind11::capsule(tensor, "dltensor", [](PyObject *obj) {
-          void *ptr = PyCapsule_GetPointer(obj, "used_dltensor");
-          if (ptr) {
-            dlmt_t *dlmt = static_cast<dlmt_t *>(ptr);
-            if (dlmt->deleter)
-              dlmt->deleter(dlmt);
-          }
-        });
+    DLTensor dl_tensor;
+    dl_tensor.data = data_ptr;
+    dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
+    std::copy(shape.begin(), shape.end(),
+              dl_tensor.shape); // Init with correct shape
+    dl_tensor.device = device;
+    dl_tensor.ndim = ndim;
+    dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
+                                 detail::TypeToDLPackCode<T>::bits,
+                                 detail::TypeToDLPackCode<T>::lanes};
+    dl_tensor.strides = nullptr;
+    dl_tensor.byte_offset = 0;
 
-    return capsule;
+    if (versioned) {
+      auto versioned_tensor = std::make_unique<DLManagedTensorVersioned>();
+
+      versioned_tensor->version =
+          DLPackVersion{DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
+      versioned_tensor->manager_ctx = this;
+      versioned_tensor->deleter =
+          &detail::dl_tensor_deleter<DLManagedTensorVersioned *>;
+      versioned_tensor->flags = 0;
+      versioned_tensor->dl_tensor = dl_tensor;
+
+      // Release unique pointer to capsule, as we transfer ownership to the
+      // python capsule.
+      return pybind11::capsule(
+          versioned_tensor.release(), "dltensor",
+          &detail::dl_capsule_deleter<DLManagedTensorVersioned *>);
+    } else { // Versioned DLtensor not supported
+      auto tensor = std::make_unique<DLManagedTensor>();
+      tensor->dl_tensor = dl_tensor;
+      tensor->manager_ctx = this;
+      tensor->deleter = &detail::dl_tensor_deleter<DLManagedTensor *>;
+
+      // Release unique pointer to capsule, as we transfer ownership to the
+      // python capsule.
+      return pybind11::capsule(tensor.release(), "dltensor",
+                               &detail::dl_capsule_deleter<DLManagedTensor *>);
+    }
   }
 
   // Context manager methods
