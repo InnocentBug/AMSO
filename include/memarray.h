@@ -122,7 +122,9 @@ public:
     dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
     std::copy(shape.begin(), shape.end(),
               dl_tensor.shape); // Init with correct shape
-    dl_tensor.device = get_dlpack_device();
+    auto device_pair = get_dlpack_device();
+    dl_tensor.device.device_type = device_pair.first;
+    dl_tensor.device.device_id = device_pair.second;
     dl_tensor.ndim = ndim;
     dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
                                  detail::TypeToDLPackCode<T>::bits,
@@ -159,16 +161,10 @@ public:
     }
   }
 
-  DLDevice get_dlpack_device() {
-    DLDevice device;
-    device.device_id = device_id;
+  std::pair<DLDeviceType, int32_t> get_dlpack_device() {
     if (on_device)
-      device.device_type = DLDeviceType::kDLCUDA;
-    else {
-      device.device_id = 0;
-      device.device_type = DLDeviceType::kDLCPU;
-    }
-    return device;
+      return std::make_pair(DLDeviceType::kDLCUDA, device_id);
+    return std::make_pair(DLDeviceType::kDLCPU, 0);
   }
 
   // Context manager methods

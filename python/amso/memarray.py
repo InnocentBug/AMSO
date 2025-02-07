@@ -43,8 +43,7 @@ class MemArray:
             return dlpack
 
         def __dlpack_device__(self):
-            print("dlpack_device")
-            return self._cpp_memarray._dlpack_device
+            return self._cpp_memarray._dlpack_device()
 
     # On the C++ side we instanciate only certain types from the template.
     # This map maps the user arguments for types and ndim to the correct instance
