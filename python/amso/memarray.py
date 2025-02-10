@@ -1,3 +1,5 @@
+import uuid
+
 import numpy as np
 
 from ._amso import (
@@ -13,17 +15,22 @@ from ._amso import (
     MemArray3DFloat,
     MemArray3DInt32,
     MemArray3DInt64,
-    dlpack,
 )
+from ._amso import dlpack as amso_dlpack
 
 
 class MemArray:
     class DLPackWrapper:
-        def __init__(self, cpp_memarray):
+        def __init__(self, lock_id: int, cpp_memarray):
+            lock_id = lock_id % (2**63 - 1)  # Int64 max to avoid bad C++ values
+            if lock_id < 0:
+                lock_id *= -1
+
+            self._lock_id: int = lock_id
             self._cpp_memarray = cpp_memarray
 
         def __enter__(self):
-            self._cpp_memarray._enter()
+            self._cpp_memarray._enter(self._lock_id)
             return self
 
         def __exit__(self, exc_type, exc_val, exc_tb):
@@ -49,29 +56,22 @@ class MemArray:
                 if not int(current_device_type) == int(
                     requested_device_type
                 ):  # We have to compare as int, since the request might be a different Enum definition.
-                    if requested_device_type == dlpack.kDLCPU:
-                        self._cpp_memarray.to_host()
-                    elif requested_device_type == dlpack.kDLCUDA:
-                        self._cpp_memarray.to_device()
+                    if requested_device_type == amso_dlpack.kDLCPU:
+                        self._cpp_memarray._to_host(self._lock_id)
+                    elif requested_device_type == amso_dlpack.kDLCUDA:
+                        self._cpp_memarray._to_device(self._lock_id)
                     else:
                         raise BufferError(
-                            f"Unable to convert Array to Device type {requested_device_type}. Only supported are {dlpack.kDLCPU} and {dlpack.kDLCUDA}."
+                            f"Unable to convert Array to Device type {requested_device_type}. Only supported are {amso_dlpack.kDLCPU} and {amso_dlpack.kDLCUDA}."
                         )
 
-            help(dlpack)
-
             if max_version is None:
-                dlpack = self._cpp_memarray._dlpack(False)
+                dlpack = self._cpp_memarray._dlpack(False, self._lock_id)
             else:
-                if max_version[0] >= dlpack.DLPACK_MAJOR_VERSION:
-                    dlpack = self._cpp_memarray._dlpack(True)
+                if max_version[0] > amso_dlpack.DLPACK_MAJOR_VERSION:
+                    dlpack = self._cpp_memarray._dlpack(True, self._lock_id)
                 else:
-                    dlpack = self._cpp_memarray._dlpack(False)
-
-            if max_version[0] > 1:
-                dlpack = self._cpp_memarray._dlpack(True)
-            else:
-                dlpack = self._cpp_memarray._dlpack(False)
+                    dlpack = self._cpp_memarray._dlpack(False, self._lock_id)
 
             return dlpack
 
@@ -117,22 +117,25 @@ class MemArray:
 
         self._cpp_obj = self._cpp_type(self._shape, device_id)
 
-    def get_dlpack(self, device: str = "host"):
+    def get_dlpack(self):
         """
         To be used only in a context manager.
 
         ```
         my_array = amso.MemArray([2,3], int)
-        with my_array.get_dlpack("host") as dlpack:
+        with my_array.get_dlpack() as dlpack:
            np_array = np.from_dlpack(dlpack)
         ```
         """
-        if device == "host":
-            self._cpp_obj._to_host()
-        elif device == "device":
-            self._cpp_obj._to_device()
-
-        return self.DLPackWrapper(self._cpp_obj)
+        return self.DLPackWrapper(int(uuid.uuid4()), self._cpp_obj)
 
     def read_numpy_array(self, array):
         self._cpp_obj._read_numpy_array(array)
+
+    def to_device(self, device_type: amso_dlpack):
+        if device_type == amso_dlpack.kDLCPU:
+            self._cpp_obj._to_host(-1)
+        elif device_type == amso_dlpack.kDLCUDA:
+            self._cpp_obj._to_device(-1)
+        else:
+            raise RuntimeError(f"Requested device {device_type} not supported.")

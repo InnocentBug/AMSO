@@ -79,31 +79,26 @@ template <typename T, int ndim> class MemArray {
   using StreamId_t = int64_t;
 
 private:
-  thrust::host_vector<T> host_vec; // Pinned memory
-  thrust::device_vector<T> device_vec;
+  thrust::host_vector<T> _host_vec;
+  thrust::device_vector<T> _device_vec;
 
-  std::array<int64_t, ndim> shape;
-  int64_t size;
+  std::array<int64_t, ndim> _shape;
+  int64_t _size;
 
-  bool on_device;
-  int device_id;
+  bool _on_device;
+  int _device_id;
 
-  int lock_count; // Context manager locks
-
-  // Keeping track of dlpack capsule to see if they have been released
-  std::map<int64_t *, bool> dlpack_capsule_lock;
+  int64_t _lock_id; // Context manager lock, ID. Negative means unlocked.
+                    // Positive, locked to that context manager
 
 private:
-  bool all_dlpack_capsules_unlocked() {
-    for (auto iter : dlpack_capsule_lock) {
-      if (iter.second)
-        return false;
-      std::cout << "test: " << iter.first << " " << iter.second << std::endl;
-    }
-    return true;
-  }
+  const std::array<int64_t, ndim> &get_shape() const { return _shape; }
+  int64_t get_size() const { return _size; }
+  bool get_on_device() const { return _on_device; }
+  int get_device_id() const { return _device_id; }
+  int64_t get_lock_id() const { return _lock_id; }
 
-  cudaStream_t convert_python_int_to_stream(int64_t stream_id) {
+  cudaStream_t convert_python_int_to_stream(const int64_t stream_id) {
     cudaStream_t stream = cudaStreamLegacy;
     switch (stream_id) {
     case 0:
@@ -121,11 +116,11 @@ private:
   }
 
 public:
-  MemArray(const std::array<int64_t, ndim> &shape_, int device_id_)
-      : shape({0}), size(0), on_device(false), device_id(device_id_),
-        lock_count(0) {
+  MemArray(const std::array<int64_t, ndim> &shape, int device_id)
+      : _shape({0}), _size(0), _on_device(false), _device_id(device_id),
+        _lock_id(-1) {
 
-    for (auto shape_element : shape_) {
+    for (auto shape_element : shape) {
       if (shape_element <= 0) {
         std::string msg = "Invalid shape argument, all shapes have to be "
                           "bigger then 0 but got < ";
@@ -134,27 +129,35 @@ public:
         msg += "> where " + std::to_string(shape_element) + " is invalid";
         throw std::invalid_argument(msg);
       }
-
-      size = 1;
-      for (auto shape_element : shape_)
-        size *= shape_element;
-
-      host_vec = thrust::host_vector<T>(size);
-      shape = shape_;
     }
+    int64_t size = 1;
+    for (auto shape_element : shape)
+      size *= shape_element;
+
+    // Init internals
+    _host_vec = thrust::host_vector<T>(size);
+    _size = size;
+    _shape = shape;
   }
 
-  pybind11::capsule get_dlpack_tensor(bool versioned) {
-    if (lock_count == 0)
+  pybind11::capsule get_dlpack_tensor(const bool versioned,
+                                      const int64_t requested_lock_id) {
+    if (get_lock_id() < 0)
       throw std::runtime_error("Accessing memory without active context.");
+    if (get_lock_id() != requested_lock_id)
+      throw std::runtime_error(
+          "Accesing memory from a different context manager. Requesting ID " +
+          std::to_string(requested_lock_id) + " locked ID " +
+          std::to_string(get_lock_id()) + ".");
 
-    T *data_ptr = on_device ? thrust::raw_pointer_cast(device_vec.data())
-                            : host_vec.data();
+    // Access to internal data
+    T *data_ptr = get_on_device() ? thrust::raw_pointer_cast(_device_vec.data())
+                                  : _host_vec.data();
 
     DLTensor dl_tensor;
     dl_tensor.data = data_ptr;
     dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
-    std::copy(shape.begin(), shape.end(),
+    std::copy(get_shape().begin(), get_shape().end(),
               dl_tensor.shape); // Init with correct shape
 
     auto device_pair = get_dlpack_device();
@@ -196,50 +199,64 @@ public:
     }
   }
 
-  std::pair<DLDeviceType, int32_t> get_dlpack_device() {
-    if (on_device)
-      return std::make_pair(DLDeviceType::kDLCUDA, device_id);
+  std::pair<DLDeviceType, int32_t> get_dlpack_device() const {
+    if (get_on_device())
+      return std::make_pair(DLDeviceType::kDLCUDA, get_device_id());
     return std::make_pair(DLDeviceType::kDLCPU, 0);
   }
 
   // Context manager methods
-  void enter() { lock_count++; }
-  void exit() { lock_count--; }
+  void enter(const int64_t lock_id) { _lock_id = lock_id; }
+  void exit() { _lock_id = -1; }
 
-  void to_device() {
-    if (on_device)
+  void to_device(const int64_t requested_lock_id = -1) {
+    if (get_on_device())
       return;
 
-    if (lock_count > 0)
-      throw std::runtime_error("Cannot move memory while locked to device");
+    if (get_lock_id() > 0 and requested_lock_id != get_lock_id())
+      throw std::runtime_error("To device memory transfer impossible, since "
+                               "memory is locked to ID " +
+                               std::to_string(get_lock_id()) +
+                               " but requesting lock id is " +
+                               std::to_string(requested_lock_id) + ".");
+    if (get_lock_id() < 0 and requested_lock_id > 0)
+      throw std::runtime_error(
+          "To device memory transfer requested with lock id " +
+          std::to_string(requested_lock_id) + " but memory is unlocked.");
 
-    cudaSetDevice(device_id);
+    cudaSetDevice(get_device_id());
     // thrust::copy_n(thrust::device, host_vec.begin(), size,
     // device_vec.begin());
-    device_vec = host_vec;
-    on_device = true;
+    _device_vec = _host_vec;
+    _on_device = true;
   }
 
-  void to_host() {
-    if (not on_device)
+  void to_host(const int64_t requested_lock_id = -1) {
+    if (not get_on_device())
       return;
 
-    if (lock_count > 0)
-      throw std::runtime_error("Cannot move memory while locked to host");
+    if (get_lock_id() > 0 and requested_lock_id != get_lock_id())
+      throw std::runtime_error("To device memory transfer impossible, since "
+                               "memory is locked to ID " +
+                               std::to_string(get_lock_id()) +
+                               " but requesting lock id is " +
+                               std::to_string(requested_lock_id) + ".");
+    if (get_lock_id() < 0 and requested_lock_id > 0)
+      throw std::runtime_error(
+          "To device memory transfer requested with lock id " +
+          std::to_string(requested_lock_id) + " but memory is unlocked.");
 
-    cudaSetDevice(device_id);
+    cudaSetDevice(get_device_id());
     // thrust::copy_n(thrust::device, device_vec.begin(), size,
     // host_vec.begin());
-    host_vec = device_vec;
-    on_device = false;
+    _host_vec = _device_vec;
+    _on_device = false;
   }
-
-  int get_lock_count() { return lock_count; }
 
   void read_numpy_array(pybind11::array_t<T, pybind11::array::c_style |
                                                  pybind11::array::forcecast>
                             np_array) {
-    to_host();
+    to_host(-1);
     pybind11::buffer_info buf = np_array.request();
 
     if (buf.ndim != ndim)
@@ -249,16 +266,16 @@ public:
                                   std::to_string(ndim) + " dimensions.");
 
     for (auto i = 0; i < ndim; ++i) {
-      if (buf.shape[i] != shape[i]) {
+      if (buf.shape[i] != get_shape()[i]) {
         throw std::invalid_argument(
             "Input array has incompatible shapes at pos " + std::to_string(i) +
             " input has " + std::to_string(buf.shape[i]) + " MemArray has " +
-            std::to_string(shape[i]) + ".");
+            std::to_string(get_shape()[i]) + ".");
       }
     }
 
-    thrust::copy_n(thrust::host, static_cast<T *>(buf.ptr), size,
-                   host_vec.begin());
+    thrust::copy_n(thrust::host, static_cast<T *>(buf.ptr), get_size(),
+                   _host_vec.begin());
   }
 };
 
