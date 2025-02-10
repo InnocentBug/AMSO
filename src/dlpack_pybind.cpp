@@ -3,6 +3,7 @@
 
 namespace py = pybind11;
 
+namespace amso {
 void pybind_dlpack(py::module_ &m) {
   py::module_ dlpack = m.def_submodule("dlpack", "DLpack python binding.");
   py::enum_<DLDeviceType>(dlpack, "DLDeviceType")
@@ -25,3 +26,4 @@ void pybind_dlpack(py::module_ &m) {
   dlpack.attr("DLPACK_MAJOR_VERSION") = DLPACK_MAJOR_VERSION;
   dlpack.attr("DLPACK_MINOR_VERSION") = DLPACK_MINOR_VERSION;
 }
+}; // namespace amso

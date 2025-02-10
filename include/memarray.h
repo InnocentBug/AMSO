@@ -1,93 +1,25 @@
 #include <array>
 
-#include <cuda_runtime.h>
+#include "memarray_cuda.cuh"
 #include <dlpack/dlpack.h>
-#include <pybind11/cast.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-#include <thrust/copy.h>
 #include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
 #include <thrust/host_vector.h>
 
 #pragma once
 
 namespace amso {
 
-template <typename T, int ndim> class MemArray; // Forward Declaration
-
-namespace detail {
-template <typename T> struct TypeToDLPackCode {
-  static constexpr DLDataTypeCode code = kDLOpaqueHandle;
-  static constexpr uint8_t bits = 8 * sizeof(T);
-  static constexpr uint8_t lanes = 1;
-};
-
-template <> struct TypeToDLPackCode<int32_t> {
-  static constexpr DLDataTypeCode code = kDLInt;
-  static constexpr uint8_t bits = 8 * sizeof(int32_t);
-  static constexpr uint8_t lanes = 1;
-};
-template <> struct TypeToDLPackCode<int64_t> {
-  static constexpr DLDataTypeCode code = kDLInt;
-  static constexpr uint8_t bits = 8 * sizeof(int64_t);
-  static constexpr uint8_t lanes = 1;
-};
-template <> struct TypeToDLPackCode<float> {
-  static constexpr DLDataTypeCode code = kDLFloat;
-  static constexpr uint8_t bits = 8 * sizeof(float);
-  static constexpr uint8_t lanes = 1;
-};
-template <> struct TypeToDLPackCode<double> {
-  static constexpr DLDataTypeCode code = kDLFloat;
-  static constexpr uint8_t bits = 8 * sizeof(double);
-  static constexpr uint8_t lanes = 1;
-};
-
-template <typename tensor_ptr_type, typename T, int ndim>
-void dl_tensor_deleter(tensor_ptr_type self) {
-  auto *wrapper = static_cast<MemArray<T, ndim> *>(self->manager_ctx);
-
-  delete[] self->dl_tensor.shape;
-  delete[] self->dl_tensor.strides;
-  // Invalidate tensor
-  self->dl_tensor.data = nullptr;
-  self->dl_tensor.ndim = 0;
-  self->dl_tensor.shape = nullptr;
-  self->dl_tensor.strides = nullptr;
-  self->dl_tensor.byte_offset = 0;
-}
-template <typename tensor_ptr_type> void dl_capsule_deleter(PyObject *capsule) {
-  void *raw_ptr = nullptr;
-  // Can be original name if unused "dltensor"
-  if (strcmp("dltensor", PyCapsule_GetName(capsule)) == 0)
-    raw_ptr = PyCapsule_GetPointer(capsule, "dltensor");
-  else // "used_dltensor if capsule is consumed
-    raw_ptr = PyCapsule_GetPointer(capsule, "used_dltensor");
-
-  if (raw_ptr) // Unknown capsule or already freed capsule
-  {
-    tensor_ptr_type tensor_ptr = static_cast<tensor_ptr_type>(raw_ptr);
-    if (tensor_ptr->deleter) // Execute custom deleter, here delete[] shape.
-      tensor_ptr->deleter(tensor_ptr);
-  }
-}
-}; // namespace detail
-
 template <typename T, int ndim> class MemArray {
-  using StreamId_t = int64_t;
-
 private:
   thrust::host_vector<T> _host_vec;
   thrust::device_vector<T> _device_vec;
 
   std::array<int64_t, ndim> _shape;
   int64_t _size;
-
   bool _on_device;
   int _device_id;
-
   int64_t _lock_id; // Context manager lock, ID. Negative means unlocked.
                     // Positive, locked to that context manager
 
@@ -98,199 +30,39 @@ private:
   int get_device_id() const { return _device_id; }
   int64_t get_lock_id() const { return _lock_id; }
 
-  cudaStream_t convert_python_int_to_stream(const int64_t stream_id) {
-    cudaStream_t stream = cudaStreamLegacy;
-    switch (stream_id) {
-    case 0:
-      stream = cudaStreamLegacy;
-      break;
-    case 1:
-      stream = cudaStreamPerThread;
-      break;
-    default:
-      stream = reinterpret_cast<cudaStream_t>(
-          stream_id); // This reinterpret_cast is a little suspicious, however
-                      // PyTorch does it that way. So it should be fine.
-    }
-    return stream;
-  }
+  cudaStream_t convert_python_int_to_stream(const int64_t stream_id);
+
+  void to_device(const int64_t requested_cuda_stream_id,
+                 const int requested_device_id,
+                 const int64_t requested_lock_id = -1);
+
+  void to_host(const int64_t requested_cuda_stream_id,
+               const int requested_device_id,
+               const int64_t requested_lock_id = -1);
 
 public:
-  MemArray(const std::array<int64_t, ndim> &shape, int device_id)
-      : _shape({0}), _size(0), _on_device(false), _device_id(device_id),
-        _lock_id(-1) {
+  MemArray(const std::array<int64_t, ndim> &shape, int device_id);
 
-    for (auto shape_element : shape) {
-      if (shape_element <= 0) {
-        std::string msg = "Invalid shape argument, all shapes have to be "
-                          "bigger then 0 but got < ";
-        for (auto invalid_shape : shape)
-          msg += std::to_string(invalid_shape) + " ";
-        msg += "> where " + std::to_string(shape_element) + " is invalid";
-        throw std::invalid_argument(msg);
-      }
-    }
-    int64_t size = 1;
-    for (auto shape_element : shape)
-      size *= shape_element;
-
-    // Init internals
-    _host_vec = thrust::host_vector<T>(size);
-    _size = size;
-    _shape = shape;
-  }
+  void move_memory(const DLDeviceType requested_device_type,
+                   const int64_t requested_cuda_stream_id,
+                   const int requested_device_id,
+                   const int64_t requested_lock_id = -1);
 
   pybind11::capsule get_dlpack_tensor(const bool versioned,
-                                      const int64_t requested_lock_id) {
-    if (get_lock_id() < 0)
-      throw std::runtime_error("Accessing memory without active context.");
-    if (get_lock_id() != requested_lock_id)
-      throw std::runtime_error(
-          "Accesing memory from a different context manager. Requesting ID " +
-          std::to_string(requested_lock_id) + " locked ID " +
-          std::to_string(get_lock_id()) + ".");
+                                      const int64_t requested_lock_id);
 
-    // Access to internal data
-    T *data_ptr = get_on_device() ? thrust::raw_pointer_cast(_device_vec.data())
-                                  : _host_vec.data();
-
-    DLTensor dl_tensor;
-    dl_tensor.data = data_ptr;
-    dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
-    std::copy(get_shape().begin(), get_shape().end(),
-              dl_tensor.shape); // Init with correct shape
-
-    auto device_pair = get_dlpack_device();
-    dl_tensor.device.device_type = device_pair.first;
-    dl_tensor.device.device_id = device_pair.second;
-    dl_tensor.ndim = ndim;
-    dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
-                                 detail::TypeToDLPackCode<T>::bits,
-                                 detail::TypeToDLPackCode<T>::lanes};
-    dl_tensor.strides = nullptr;
-    dl_tensor.byte_offset = 0;
-
-    if (versioned) {
-      auto versioned_tensor = std::make_unique<DLManagedTensorVersioned>();
-
-      versioned_tensor->version =
-          DLPackVersion{DLPACK_MAJOR_VERSION, DLPACK_MINOR_VERSION};
-      versioned_tensor->manager_ctx = this;
-      versioned_tensor->deleter =
-          &detail::dl_tensor_deleter<DLManagedTensorVersioned *, T, ndim>;
-      versioned_tensor->flags = 0;
-      versioned_tensor->dl_tensor = dl_tensor;
-
-      // Release unique pointer to capsule, as we transfer ownership to the
-      // python capsule.
-      return pybind11::capsule(
-          versioned_tensor.release(), "dltensor",
-          &detail::dl_capsule_deleter<DLManagedTensorVersioned *>);
-    } else { // Versioned DLtensor not supported
-      auto tensor = std::make_unique<DLManagedTensor>();
-      tensor->dl_tensor = dl_tensor;
-      tensor->manager_ctx = this;
-      tensor->deleter = &detail::dl_tensor_deleter<DLManagedTensor *, T, ndim>;
-
-      // Release unique pointer to capsule, as we transfer ownership to the
-      // python capsule.
-      return pybind11::capsule(tensor.release(), "dltensor",
-                               &detail::dl_capsule_deleter<DLManagedTensor *>);
-    }
-  }
-
-  std::pair<DLDeviceType, int32_t> get_dlpack_device() const {
-    if (get_on_device())
-      return std::make_pair(DLDeviceType::kDLCUDA, get_device_id());
-    return std::make_pair(DLDeviceType::kDLCPU, 0);
-  }
+  std::pair<DLDeviceType, int32_t> get_dlpack_device() const;
 
   // Context manager methods
   void enter(const int64_t lock_id) { _lock_id = lock_id; }
   void exit() { _lock_id = -1; }
 
-  void to_device(const int64_t requested_lock_id = -1) {
-    if (get_on_device())
-      return;
-
-    if (get_lock_id() > 0 and requested_lock_id != get_lock_id())
-      throw std::runtime_error("To device memory transfer impossible, since "
-                               "memory is locked to ID " +
-                               std::to_string(get_lock_id()) +
-                               " but requesting lock id is " +
-                               std::to_string(requested_lock_id) + ".");
-    if (get_lock_id() < 0 and requested_lock_id > 0)
-      throw std::runtime_error(
-          "To device memory transfer requested with lock id " +
-          std::to_string(requested_lock_id) + " but memory is unlocked.");
-
-    cudaSetDevice(get_device_id());
-    // thrust::copy_n(thrust::device, host_vec.begin(), size,
-    // device_vec.begin());
-    _device_vec = _host_vec;
-    _on_device = true;
-  }
-
-  void to_host(const int64_t requested_lock_id = -1) {
-    if (not get_on_device())
-      return;
-
-    if (get_lock_id() > 0 and requested_lock_id != get_lock_id())
-      throw std::runtime_error("To device memory transfer impossible, since "
-                               "memory is locked to ID " +
-                               std::to_string(get_lock_id()) +
-                               " but requesting lock id is " +
-                               std::to_string(requested_lock_id) + ".");
-    if (get_lock_id() < 0 and requested_lock_id > 0)
-      throw std::runtime_error(
-          "To device memory transfer requested with lock id " +
-          std::to_string(requested_lock_id) + " but memory is unlocked.");
-
-    cudaSetDevice(get_device_id());
-    // thrust::copy_n(thrust::device, device_vec.begin(), size,
-    // host_vec.begin());
-    _host_vec = _device_vec;
-    _on_device = false;
-  }
-
   void read_numpy_array(pybind11::array_t<T, pybind11::array::c_style |
                                                  pybind11::array::forcecast>
-                            np_array) {
-    to_host(-1);
-    pybind11::buffer_info buf = np_array.request();
-
-    if (buf.ndim != ndim)
-      throw std::invalid_argument("Input array has " +
-                                  std::to_string(buf.ndim) +
-                                  " dimensions, but target memarray has " +
-                                  std::to_string(ndim) + " dimensions.");
-
-    for (auto i = 0; i < ndim; ++i) {
-      if (buf.shape[i] != get_shape()[i]) {
-        throw std::invalid_argument(
-            "Input array has incompatible shapes at pos " + std::to_string(i) +
-            " input has " + std::to_string(buf.shape[i]) + " MemArray has " +
-            std::to_string(get_shape()[i]) + ".");
-      }
-    }
-
-    thrust::copy_n(thrust::host, static_cast<T *>(buf.ptr), get_size(),
-                   _host_vec.begin());
-  }
+                            np_array);
 };
 
 template <typename T, int ndim>
-void bind_mem_array(pybind11::module &m, std::string python_name) {
-  pybind11::class_<MemArray<T, ndim>>(m, python_name.c_str())
-      .def(pybind11::init<const std::array<int64_t, ndim> &, int>())
-
-      .def("_enter", &MemArray<T, ndim>::enter)
-      .def("_exit", &MemArray<T, ndim>::exit)
-      .def("_to_device", &MemArray<T, ndim>::to_device)
-      .def("_to_host", &MemArray<T, ndim>::to_host)
-      .def("_dlpack", &MemArray<T, ndim>::get_dlpack_tensor)
-      .def("_read_numpy_array", &MemArray<T, ndim>::read_numpy_array)
-      .def("_dlpack_device", &MemArray<T, ndim>::get_dlpack_device);
-}
+void template_bind_mem_array(pybind11::module &m, std::string python_name);
 
 } // namespace amso

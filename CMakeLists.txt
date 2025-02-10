@@ -19,6 +19,10 @@ endif(ENABLE_CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set the C++ standard
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -49,6 +53,12 @@ if(ENABLE_CUDA)
     message(STATUS "No CUDA compiler found")
   endif(CMAKE_CUDA_COMPILER)
 endif(ENABLE_CUDA)
+
+find_package(
+  Python
+  COMPONENTS Interpreter Development Development.Module
+  REQUIRED)
+cpmaddpackage(NAME pybind11 GITHUB_REPOSITORY pybind/pybind11 VERSION 2.10.0)
 
 # Add source files
 add_subdirectory(src)

@@ -20,6 +20,8 @@ from ._amso import dlpack as amso_dlpack
 
 
 class MemArray:
+    _SUPPORTED_DEVICE_TYPES = {amso_dlpack.kDLCUDA, amso_dlpack.kDLCPU}
+
     class DLPackWrapper:
         def __init__(self, lock_id: int, cpp_memarray):
             lock_id = lock_id % (2**63 - 1)  # Int64 max to avoid bad C++ values
@@ -44,26 +46,22 @@ class MemArray:
             copy: bool | None = None,
         ):  # We are trying to implement https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html as close as possible.
 
+            if stream is None:
+                stream = 0
+
             if dl_device is not None:
-                current_device_type, current_device_id = (
+                requested_device_type, requested_device_id = dl_device
+            else:
+                requested_device_type, requested_device_id = (
                     self._cpp_memarray._dlpack_device()
                 )
-                requested_device_type, requested_device_id = dl_device
-                if current_device_id != requested_device_id:
-                    raise BufferError(
-                        f"Memarray DLPack Request to a different device. Currently not supported requested {requested_device_id} current {current_device_id}"
-                    )
-                if not int(current_device_type) == int(
-                    requested_device_type
-                ):  # We have to compare as int, since the request might be a different Enum definition.
-                    if requested_device_type == amso_dlpack.kDLCPU:
-                        self._cpp_memarray._to_host(self._lock_id)
-                    elif requested_device_type == amso_dlpack.kDLCUDA:
-                        self._cpp_memarray._to_device(self._lock_id)
-                    else:
-                        raise BufferError(
-                            f"Unable to convert Array to Device type {requested_device_type}. Only supported are {amso_dlpack.kDLCPU} and {amso_dlpack.kDLCUDA}."
-                        )
+
+            try:
+                self._cpp_memarray._move_memory(
+                    requested_device_type, stream, requested_device_id, self._lock_id
+                )
+            except Exception as exc:
+                raise BufferError(str(exc)) from exc
 
             if max_version is None:
                 dlpack = self._cpp_memarray._dlpack(False, self._lock_id)
@@ -117,25 +115,48 @@ class MemArray:
 
         self._cpp_obj = self._cpp_type(self._shape, device_id)
 
-    def get_dlpack(self):
+    def get_dlpack(
+        self,
+        device_type: amso_dlpack.DLDeviceType | None = None,
+        device_id: int | None = None,
+        stream: int = 0,
+    ):
         """
         To be used only in a context manager.
 
         ```
         my_array = amso.MemArray([2,3], int)
-        with my_array.get_dlpack() as dlpack:
+        with my_array.get_dlpack(amso.dlpack.kDLCPU) as dlpack:
            np_array = np.from_dlpack(dlpack)
         ```
         """
+        current_device_type, current_device_id = self._cpp_obj._dlpack_device()
+        if device_type is None:
+            device_type = current_device_type
+        if device_id is None:
+            device_id = current_device_id
+
+        self._cpp_obj._move_memory(device_type, stream, device_id, -1)
+
         return self.DLPackWrapper(int(uuid.uuid4()), self._cpp_obj)
 
     def read_numpy_array(self, array):
         self._cpp_obj._read_numpy_array(array)
 
-    def to_device(self, device_type: amso_dlpack):
-        if device_type == amso_dlpack.kDLCPU:
-            self._cpp_obj._to_host(-1)
-        elif device_type == amso_dlpack.kDLCUDA:
-            self._cpp_obj._to_device(-1)
+    def move_memory(
+        self,
+        device_type: amso_dlpack.DLDeviceType,
+        device_id: int | None = None,
+        stream: int = 0,
+    ):
+
+        if device_id is None:
+            current_device_type, current_device_id = self._cpp_obj._dlpack_device()
+            device_id = current_device_id
+
+        if device_type in self._SUPPORTED_DEVICE_TYPES:
+            self._cpp_obj._move_memory(device_type, stream, device_id, -1)
         else:
-            raise RuntimeError(f"Requested device {device_type} not supported.")
+            raise RuntimeError(
+                f"Requested device {device_type} not supported. Supported types: {self._SUPPORTED_DEVICE_TYPES}"
+            )

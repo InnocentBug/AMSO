@@ -6,6 +6,6 @@
 namespace py = pybind11;
 
 PYBIND11_MODULE(_amso, m) {
-  pybind_memarray(m);
-  pybind_dlpack(m);
+  amso::pybind_dlpack(m);
+  amso::bind_mem_array(m);
 }
