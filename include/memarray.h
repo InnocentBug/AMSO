@@ -76,6 +76,8 @@ template <typename tensor_ptr_type> void dl_capsule_deleter(PyObject *capsule) {
 }; // namespace detail
 
 template <typename T, int ndim> class MemArray {
+  using StreamId_t = int64_t;
+
 private:
   thrust::host_vector<T> host_vec; // Pinned memory
   thrust::device_vector<T> device_vec;
@@ -99,6 +101,23 @@ private:
       std::cout << "test: " << iter.first << " " << iter.second << std::endl;
     }
     return true;
+  }
+
+  cudaStream_t convert_python_int_to_stream(int64_t stream_id) {
+    cudaStream_t stream = cudaStreamLegacy;
+    switch (stream_id) {
+    case 0:
+      stream = cudaStreamLegacy;
+      break;
+    case 1:
+      stream = cudaStreamPerThread;
+      break;
+    default:
+      stream = reinterpret_cast<cudaStream_t>(
+          stream_id); // This reinterpret_cast is a little suspicious, however
+                      // PyTorch does it that way. So it should be fine.
+    }
+    return stream;
   }
 
 public:

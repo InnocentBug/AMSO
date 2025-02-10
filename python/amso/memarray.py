@@ -13,6 +13,7 @@ from ._amso import (
     MemArray3DFloat,
     MemArray3DInt32,
     MemArray3DInt64,
+    dlpack,
 )
 
 
@@ -34,7 +35,39 @@ class MemArray:
             max_version: tuple[int, int] | None = None,
             dl_device: tuple | None = None,
             copy: bool | None = None,
-        ):
+        ):  # We are trying to implement https://data-apis.org/array-api/latest/API_specification/generated/array_api.array.__dlpack__.html as close as possible.
+
+            if dl_device is not None:
+                current_device_type, current_device_id = (
+                    self._cpp_memarray._dlpack_device()
+                )
+                requested_device_type, requested_device_id = dl_device
+                if current_device_id != requested_device_id:
+                    raise BufferError(
+                        f"Memarray DLPack Request to a different device. Currently not supported requested {requested_device_id} current {current_device_id}"
+                    )
+                if not int(current_device_type) == int(
+                    requested_device_type
+                ):  # We have to compare as int, since the request might be a different Enum definition.
+                    if requested_device_type == dlpack.kDLCPU:
+                        self._cpp_memarray.to_host()
+                    elif requested_device_type == dlpack.kDLCUDA:
+                        self._cpp_memarray.to_device()
+                    else:
+                        raise BufferError(
+                            f"Unable to convert Array to Device type {requested_device_type}. Only supported are {dlpack.kDLCPU} and {dlpack.kDLCUDA}."
+                        )
+
+            help(dlpack)
+
+            if max_version is None:
+                dlpack = self._cpp_memarray._dlpack(False)
+            else:
+                if max_version[0] >= dlpack.DLPACK_MAJOR_VERSION:
+                    dlpack = self._cpp_memarray._dlpack(True)
+                else:
+                    dlpack = self._cpp_memarray._dlpack(False)
+
             if max_version[0] > 1:
                 dlpack = self._cpp_memarray._dlpack(True)
             else:
