@@ -5,6 +5,10 @@ set_source_files_properties(${_amso_cpu_sources} PROPERTIES LANGUAGE CUDA)
 # Define the target first
 add_library(amso_core ${_amso_cpu_sources})
 
+# Thrust signature fix, compile with nvcc,
+# http://ludwigschneider.net/mangling-fun-with-thrust
+set_source_files_properties(${_amso_cuda_sources} PROPERTIES LANGUAGE CUDA)
+
 if(ENABLE_CUDA)
   set(_amso_cuda_sources memarray_cuda.cu)
 
@@ -37,3 +41,7 @@ target_include_directories(amso_core
 cpmaddpackage(NAME dlpack GITHUB_REPOSITORY dmlc/dlpack GIT_TAG main)
 target_include_directories(amso_core PUBLIC ${dlpack_SOURCE_DIR}/include/)
 target_include_directories(amso_core PRIVATE ${pybind11_SOURCE_DIR}/include/)
+
+# NV CCCL cpmaddpackage(NAME cccl GITHUB_REPOSITORY NVIDIA/cccl GIT_TAG main)
+# target_include_directories(amso_core PUBLIC
+# ${cccl_SOURCE_DIR}/include/thrust/)

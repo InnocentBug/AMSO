@@ -15,6 +15,18 @@ from ._amso import (
     MemArray3DFloat,
     MemArray3DInt32,
     MemArray3DInt64,
+    _add_index_tuple1DDouble,
+    _add_index_tuple1DFloat,
+    _add_index_tuple1DInt32,
+    _add_index_tuple1DInt64,
+    _add_index_tuple2DDouble,
+    _add_index_tuple2DFloat,
+    _add_index_tuple2DInt32,
+    _add_index_tuple2DInt64,
+    _add_index_tuple3DDouble,
+    _add_index_tuple3DFloat,
+    _add_index_tuple3DInt32,
+    _add_index_tuple3DInt64,
 )
 from ._amso import dlpack as amso_dlpack
 
@@ -58,7 +70,11 @@ class MemArray:
 
             try:
                 self._cpp_memarray._move_memory(
-                    requested_device_type, stream, requested_device_id, self._lock_id
+                    requested_device_type,
+                    stream,
+                    requested_device_id,
+                    self._lock_id,
+                    True,
                 )
             except Exception as exc:
                 raise BufferError(str(exc)) from exc
@@ -91,6 +107,20 @@ class MemArray:
         (np.dtype(np.float64), 1): MemArray1DDouble,
         (np.dtype(np.float64), 2): MemArray2DDouble,
         (np.dtype(np.float64), 3): MemArray3DDouble,
+    }
+    _TYPE_INSTANCE_MAP_ADD = {
+        (np.dtype(np.int32), 1): _add_index_tuple1DInt32,
+        (np.dtype(np.int32), 2): _add_index_tuple2DInt32,
+        (np.dtype(np.int32), 3): _add_index_tuple3DInt32,
+        (np.dtype(np.int64), 1): _add_index_tuple1DInt64,
+        (np.dtype(np.int64), 2): _add_index_tuple2DInt64,
+        (np.dtype(np.int64), 3): _add_index_tuple3DInt64,
+        (np.dtype(np.float32), 1): _add_index_tuple1DFloat,
+        (np.dtype(np.float32), 2): _add_index_tuple2DFloat,
+        (np.dtype(np.float32), 3): _add_index_tuple3DFloat,
+        (np.dtype(np.float64), 1): _add_index_tuple1DDouble,
+        (np.dtype(np.float64), 2): _add_index_tuple2DDouble,
+        (np.dtype(np.float64), 3): _add_index_tuple3DDouble,
     }
 
     def __init__(
@@ -136,7 +166,7 @@ class MemArray:
         if device_id is None:
             device_id = current_device_id
 
-        self._cpp_obj._move_memory(device_type, stream, device_id, -1)
+        self._cpp_obj._move_memory(device_type, stream, device_id, -1, True)
 
         return self.DLPackWrapper(int(uuid.uuid4()), self._cpp_obj)
 
@@ -148,6 +178,7 @@ class MemArray:
         device_type: amso_dlpack.DLDeviceType,
         device_id: int | None = None,
         stream: int = 0,
+        async_copy: bool = True,
     ):
 
         if device_id is None:
@@ -155,8 +186,12 @@ class MemArray:
             device_id = current_device_id
 
         if device_type in self._SUPPORTED_DEVICE_TYPES:
-            self._cpp_obj._move_memory(device_type, stream, device_id, -1)
+            self._cpp_obj._move_memory(device_type, stream, device_id, -1, async_copy)
         else:
             raise RuntimeError(
                 f"Requested device {device_type} not supported. Supported types: {self._SUPPORTED_DEVICE_TYPES}"
             )
+
+    def add_index_tuple(self):
+        func_instance = self._TYPE_INSTANCE_MAP_ADD[(self._dtype, self._ndim)]
+        func_instance(self._cpp_obj, 0)
