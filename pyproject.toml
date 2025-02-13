@@ -8,7 +8,7 @@ version = "0.0.0"
 authors = [
   { name = "Ludwig Schneider", email = "ludwigschneider@uchicago.edu" },
 ]
-dependencies = ["numpy"]
+dependencies = ["numpy", "pytest"]
 description = "C++/GPU accelerated code for polymer multi-block systems. This is a refactoring of SOMA https://doi.org/10.1016/j.cpc.2018.08.011."
 readme = "README.md"
 requires-python = ">=3.10"

@@ -306,33 +306,32 @@ void template_bind_mem_array(pybind11::module &m, std::string python_name) {
 template class MemArray<int32_t, 1>;
 using MemArray1DInt32 = MemArray<int32_t, 1>;
 template class MemArray<int32_t, 2>;
-using MemArray2DInt32 = MemArray<int32_t, 3>;
+using MemArray2DInt32 = MemArray<int32_t, 2>;
 template class MemArray<int32_t, 3>;
 using MemArray3DInt32 = MemArray<int32_t, 3>;
 
 template class MemArray<int64_t, 1>;
 using MemArray1DInt64 = MemArray<int64_t, 1>;
 template class MemArray<int64_t, 2>;
-using MemArray2DInt64 = MemArray<int64_t, 3>;
+using MemArray2DInt64 = MemArray<int64_t, 2>;
 template class MemArray<int64_t, 3>;
 using MemArray3DInt64 = MemArray<int64_t, 3>;
 
 template class MemArray<float, 1>;
 using MemArray1DFloat = MemArray<float, 1>;
 template class MemArray<float, 2>;
-using MemArray2DFloat = MemArray<float, 3>;
+using MemArray2DFloat = MemArray<float, 2>;
 template class MemArray<float, 3>;
 using MemArray3DFloat = MemArray<float, 3>;
 
 template class MemArray<double, 1>;
 using MemArray1DDouble = MemArray<double, 1>;
 template class MemArray<double, 2>;
-using MemArray2DDouble = MemArray<double, 3>;
+using MemArray2DDouble = MemArray<double, 2>;
 template class MemArray<double, 3>;
 using MemArray3DDouble = MemArray<double, 3>;
 
 void bind_mem_array(pybind11::module &m) {
-
   template_bind_mem_array<MemArray1DInt32>(m, "MemArray1DInt32");
   template_bind_mem_array<MemArray2DInt32>(m, "MemArray2DInt32");
   template_bind_mem_array<MemArray3DInt32>(m, "MemArray3DInt32");
