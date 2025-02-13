@@ -20,6 +20,14 @@ make_cuda_std_array(const std::array<T, ndim> &std_arr) {
     cuda_std_arr[i] = std_arr[i];
   return cuda_std_arr;
 }
+template <typename T, int ndim>
+std::array<T, ndim>
+make_std_cuda_array(const cuda::std::array<T, ndim> &cuda_std_arr) {
+  std::array<T, ndim> std_arr;
+  for (int i = 0; i < ndim; ++i)
+    std_arr[i] = cuda_std_arr[i];
+  return std_arr;
+}
 } // namespace detail
 
 template <typename T, int ndim> class MemArray {
@@ -35,14 +43,10 @@ private:
                     // Positive, locked to that context manager
 
 private:
-  const std::array<int, ndim> &get_shape() const { return _shape; }
-  int64_t get_size() const { return _size; }
-  bool get_on_device() const { return _on_device; }
-  int64_t get_lock_id() const { return _lock_id; }
-
   cudaStream_t convert_python_int_to_stream(const int64_t stream_id);
 
 public:
+  static constexpr int NDIM = ndim;
   class ArrayIndexer {
   private:
     const cuda::std::array<int, ndim> _shape;
@@ -65,8 +69,7 @@ public:
       }
       return index;
     }
-    __host__ __device__ inline int
-    operator()(const std::array<int, ndim> &indeces) const {
+    __host__ inline int operator()(const std::array<int, ndim> &indeces) const {
       return this->operator()(detail::make_cuda_std_array<int, ndim>(indeces));
     }
 
@@ -89,6 +92,10 @@ public:
   MemArray(const std::array<int, ndim> &shape, int device_id);
 
   int get_device_id() const { return _device_id; }
+  const std::array<int, ndim> &get_shape() const { return _shape; }
+  int64_t get_size() const { return _size; }
+  bool get_on_device() const { return _on_device; }
+  int64_t get_lock_id() const { return _lock_id; }
 
   void move_memory(const DLDeviceType requested_device_type,
                    const int64_t requested_cuda_stream_id,
@@ -110,9 +117,14 @@ public:
                             np_array);
 
   // encaspulated access access, not zero-overhead
-  T &operator()(std::array<int, ndim> indeces);
-  const T &operator()(std::array<int, ndim> indeces) const {
-    return const_cast<const T &>(this->operator()(indeces));
+  const T operator()(const std::array<int, ndim> &indeces) const;
+  const T operator()(const cuda::std::array<int, ndim> &indeces) const {
+    return this->operator()(detail::make_std_cuda_array<int, ndim>(indeces));
+  }
+
+  void write(const std::array<int, ndim> &indeces, const T &value);
+  void write(const cuda::std::array<int, ndim> &indeces, const T &value) {
+    return this->write(detail::make_std_cuda_array<int, ndim>(indeces), value);
   }
 
   // Zero over-head pointer access
@@ -126,9 +138,6 @@ public:
 
   ArrayIndexer get_indexer() const { return ArrayIndexer(get_shape()); }
 };
-
-template <typename T, int ndim>
-void template_bind_mem_array(pybind11::module &m, std::string python_name);
 
 } // namespace amso
 

@@ -19,4 +19,4 @@ urls = { homepage = "https://github.com/InnocentBug/AMSO" }
 test = ["pytest"]
 
 [tool.scikit-build]
-cmake.define = { "ENABLE_CUDA" = "ON", "CMAKE_BUILD_TYPE" = "Debug" }
+cmake.define = {}

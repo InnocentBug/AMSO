@@ -167,6 +167,7 @@ void MemArray<T, ndim>::move_memory(const DLDeviceType requested_device_type,
     throw std::runtime_error("Unsupported memory move requested " +
                              std::to_string(requested_device_type) + ".");
   }
+
   if (not async)
     event.wait();
 }
@@ -264,47 +265,89 @@ void MemArray<T, ndim>::read_numpy_array(
 }
 
 template <typename T, int ndim>
-T &MemArray<T, ndim>::operator()(std::array<int, ndim> indeces) {
+const T
+MemArray<T, ndim>::operator()(const std::array<int, ndim> &indeces) const {
   for (int i = 0; i < ndim; ++i)
     if (indeces[i] >= get_shape()[i])
       throw std::runtime_error("Invalid index for shape access");
   auto indexer = ArrayIndexer(get_shape());
   if (get_on_device())
     return _device_vec[indexer(indeces)];
-  return _host_vec[indeces(indeces)];
+  return _host_vec[indexer(indeces)];
 }
 
 template <typename T, int ndim>
-void template_bind_mem_array(pybind11::module &m, std::string python_name) {
-  pybind11::class_<MemArray<T, ndim>>(m, python_name.c_str())
-      .def(pybind11::init<const std::array<int, ndim> &, int>())
-
-      .def("_enter", &MemArray<T, ndim>::enter)
-      .def("_exit", &MemArray<T, ndim>::exit)
-      .def("_move_memory", &MemArray<T, ndim>::move_memory)
-      .def("_dlpack", &MemArray<T, ndim>::get_dlpack_tensor)
-      .def("_read_numpy_array", &MemArray<T, ndim>::read_numpy_array)
-      .def("_dlpack_device", &MemArray<T, ndim>::get_dlpack_device);
+void MemArray<T, ndim>::write(const std::array<int, ndim> &indeces,
+                              const T &value) {
+  for (int i = 0; i < ndim; ++i)
+    if (indeces[i] >= get_shape()[i])
+      throw std::runtime_error("Invalid index for write access");
+  auto indexer = ArrayIndexer(get_shape());
+  if (get_on_device())
+    _device_vec[indexer(indeces)] = value;
+  else
+    _host_vec[indexer(indeces)] = value;
 }
 
+template <typename MemArrayType>
+void template_bind_mem_array(pybind11::module &m, std::string python_name) {
+  pybind11::class_<MemArrayType>(m, python_name.c_str())
+      .def(pybind11::init<const std::array<int, MemArrayType::NDIM> &, int>())
+
+      .def("_enter", &MemArrayType::enter)
+      .def("_exit", &MemArrayType::exit)
+      .def("_move_memory", &MemArrayType::move_memory)
+      .def("_dlpack", &MemArrayType::get_dlpack_tensor)
+      .def("_read_numpy_array", &MemArrayType::read_numpy_array)
+      .def("_dlpack_device", &MemArrayType::get_dlpack_device);
+}
+
+// Explicit template instantiations
+template class MemArray<int32_t, 1>;
+using MemArray1DInt32 = MemArray<int32_t, 1>;
+template class MemArray<int32_t, 2>;
+using MemArray2DInt32 = MemArray<int32_t, 3>;
+template class MemArray<int32_t, 3>;
+using MemArray3DInt32 = MemArray<int32_t, 3>;
+
+template class MemArray<int64_t, 1>;
+using MemArray1DInt64 = MemArray<int64_t, 1>;
+template class MemArray<int64_t, 2>;
+using MemArray2DInt64 = MemArray<int64_t, 3>;
+template class MemArray<int64_t, 3>;
+using MemArray3DInt64 = MemArray<int64_t, 3>;
+
+template class MemArray<float, 1>;
+using MemArray1DFloat = MemArray<float, 1>;
+template class MemArray<float, 2>;
+using MemArray2DFloat = MemArray<float, 3>;
+template class MemArray<float, 3>;
+using MemArray3DFloat = MemArray<float, 3>;
+
+template class MemArray<double, 1>;
+using MemArray1DDouble = MemArray<double, 1>;
+template class MemArray<double, 2>;
+using MemArray2DDouble = MemArray<double, 3>;
+template class MemArray<double, 3>;
+using MemArray3DDouble = MemArray<double, 3>;
+
 void bind_mem_array(pybind11::module &m) {
-  // Templace instantiations
 
-  template_bind_mem_array<int32_t, 1>(m, "MemArray1DInt32");
-  template_bind_mem_array<int32_t, 2>(m, "MemArray2DInt32");
-  template_bind_mem_array<int32_t, 3>(m, "MemArray3DInt32");
+  template_bind_mem_array<MemArray1DInt32>(m, "MemArray1DInt32");
+  template_bind_mem_array<MemArray2DInt32>(m, "MemArray2DInt32");
+  template_bind_mem_array<MemArray3DInt32>(m, "MemArray3DInt32");
 
-  template_bind_mem_array<int64_t, 1>(m, "MemArray1DInt64");
-  template_bind_mem_array<int64_t, 2>(m, "MemArray2DInt64");
-  template_bind_mem_array<int64_t, 3>(m, "MemArray3DInt64");
+  template_bind_mem_array<MemArray1DInt64>(m, "MemArray1DInt64");
+  template_bind_mem_array<MemArray2DInt64>(m, "MemArray2DInt64");
+  template_bind_mem_array<MemArray3DInt64>(m, "MemArray3DInt64");
 
-  template_bind_mem_array<float, 1>(m, "MemArray1DFloat");
-  template_bind_mem_array<float, 2>(m, "MemArray2DFloat");
-  template_bind_mem_array<float, 3>(m, "MemArray3DFloat");
+  template_bind_mem_array<MemArray1DFloat>(m, "MemArray1DFloat");
+  template_bind_mem_array<MemArray2DFloat>(m, "MemArray2DFloat");
+  template_bind_mem_array<MemArray3DFloat>(m, "MemArray3DFloat");
 
-  template_bind_mem_array<double, 1>(m, "MemArray1DDouble");
-  template_bind_mem_array<double, 2>(m, "MemArray2DDouble");
-  template_bind_mem_array<double, 3>(m, "MemArray3DDouble");
+  template_bind_mem_array<MemArray1DDouble>(m, "MemArray1DDouble");
+  template_bind_mem_array<MemArray2DDouble>(m, "MemArray2DDouble");
+  template_bind_mem_array<MemArray3DDouble>(m, "MemArray3DDouble");
 }
 
 } // namespace amso
