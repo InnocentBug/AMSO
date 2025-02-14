@@ -38,6 +38,9 @@ lint:
         - build/**
         - cmake/**
         - amso/**
+    - linters: [bandit]
+      paths:
+        - tests/pytest/**
 actions:
   enabled:
     - trunk-announce

@@ -1,5 +1,3 @@
-import time
-
 import amso
 import numpy as np
 import pytest
@@ -62,7 +60,9 @@ def test_memarray(shape, dtype):
     mem_array = amso.MemArray(shape, dtype)
 
     with mem_array.get_dlpack() as dlpack:
-        local_array = np.from_dlpack(dlpack).copy()
+        local_array = np.from_dlpack(dlpack)
+        assert local_array.shape == shape
+        assert local_array.dtype == dtype
 
     mem_array.move_memory(amso_dlpack.kDLCUDA)
 
