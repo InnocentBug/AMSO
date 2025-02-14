@@ -137,6 +137,18 @@ public:
   int64_t get_size() const { return _size; }
   bool get_on_device() const { return _on_device; }
   int64_t get_lock_id() const { return _lock_id; }
+  void throw_invalid_lock_access(const int64_t requested_lock_id) const {
+    if (get_lock_id() > 0 and requested_lock_id != get_lock_id())
+      throw std::runtime_error("Memory access impossible, since "
+                               "memory is locked to ID " +
+                               std::to_string(get_lock_id()) +
+                               " but requesting lock id is " +
+                               std::to_string(requested_lock_id) + ".");
+    if (get_lock_id() < 0 and requested_lock_id > 0)
+      throw std::runtime_error("Memory access requested with lock id " +
+                               std::to_string(requested_lock_id) +
+                               " but memory is unlocked.");
+  }
 
   void move_memory(const DLDeviceType requested_device_type,
                    const int64_t requested_cuda_stream_id,
@@ -150,7 +162,15 @@ public:
   std::pair<DLDeviceType, int32_t> get_dlpack_device() const;
 
   // Context manager methods
-  void enter(const int64_t lock_id) { _lock_id = lock_id; }
+  void enter(const int64_t lock_id) {
+    if (get_lock_id() >= 0 and lock_id != get_lock_id())
+      throw std::runtime_error("Attempting to lock memory with " +
+                               std::to_string(lock_id) +
+                               ", but memory is already locked with " +
+                               std::to_string(get_lock_id()) + ".");
+
+    _lock_id = lock_id;
+  }
   void exit() { _lock_id = -1; }
 
   void read_numpy_array(pybind11::array_t<T, pybind11::array::c_style |
@@ -158,24 +178,34 @@ public:
                             np_array);
 
   // encaspulated access access, not zero-overhead
-  const T operator()(const std::array<int, ndim> &indeces) const;
-  const T operator()(const cuda::std::array<int, ndim> &indeces) const {
-    return this->operator()(detail::make_std_cuda_array<int, ndim>(indeces));
+  const T operator()(const std::array<int, ndim> &indeces,
+                     const int64_t requested_lock_id = -1) const;
+  const T operator()(const cuda::std::array<int, ndim> &indeces,
+                     const int64_t requested_lock_id = -1) const {
+    return this->operator()(detail::make_std_cuda_array<int, ndim>(indeces),
+                            requested_lock_id);
   }
 
-  void write(const std::array<int, ndim> &indeces, const T &value);
-  void write(const cuda::std::array<int, ndim> &indeces, const T &value) {
-    return this->write(detail::make_std_cuda_array<int, ndim>(indeces), value);
+  void write(const std::array<int, ndim> &indeces, const T &value,
+             const int64_t requested_lock_id = -1);
+  void write(const cuda::std::array<int, ndim> &indeces, const T &value,
+             const int64_t requested_lock_id = -1) {
+    return this->write(detail::make_std_cuda_array<int, ndim>(indeces), value,
+                       requested_lock_id);
   }
 
   // Zero over-head pointer access
   // Taking the sharp knives out of the drawer: don't cut yourself
-  T *ptr() {
+  T *ptr(const int64_t requested_lock_id = -1) {
+    throw_invalid_lock_access(requested_lock_id);
+
     if (_on_device)
       return thrust::raw_pointer_cast(_device_vec.data());
     return _host_vec.data();
   }
-  const T *ptr() const { return const_cast<const T *>(this->ptr()); }
+  const T *ptr(const int64_t requested_lock_id = -1) const {
+    return const_cast<const T *>(this->ptr(requested_lock_id));
+  }
 
   ArrayIndexer get_indexer() const { return ArrayIndexer(get_shape()); }
 };

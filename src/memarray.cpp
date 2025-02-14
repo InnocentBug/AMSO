@@ -88,6 +88,9 @@ MemArray<T, ndim>::MemArray(const std::array<int, ndim> &shape, int device_id)
   for (auto shape_element : shape)
     size *= shape_element;
 
+  // Ensure proper device
+  cudaSetDevice(device_id);
+
   // Init internals
   _host_vec = thrust::host_vector<T>(size);
   _device_vec = thrust::device_vector<T>(size);
@@ -122,16 +125,7 @@ void MemArray<T, ndim>::move_memory(const DLDeviceType requested_device_type,
                                     const int64_t requested_lock_id,
                                     const bool async) {
   // Sanity checks
-  if (get_lock_id() > 0 and requested_lock_id != get_lock_id())
-    throw std::runtime_error("Memory transfer impossible, since "
-                             "memory is locked to ID " +
-                             std::to_string(get_lock_id()) +
-                             " but requesting lock id is " +
-                             std::to_string(requested_lock_id) + ".");
-  if (get_lock_id() < 0 and requested_lock_id > 0)
-    throw std::runtime_error("Memory transfer requested with lock id " +
-                             std::to_string(requested_lock_id) +
-                             " but memory is unlocked.");
+  throw_invalid_lock_access(requested_lock_id);
 
   if (requested_device_id > 0 and get_device_id() != requested_device_id)
     throw std::runtime_error("Requested to move memory to different device (" +
@@ -182,16 +176,8 @@ template <typename T, int ndim>
 pybind11::capsule
 MemArray<T, ndim>::get_dlpack_tensor(const bool versioned,
                                      const int64_t requested_lock_id) {
-  if (get_lock_id() < 0)
-    throw std::runtime_error("Accessing memory without active context.");
-  if (get_lock_id() != requested_lock_id)
-    throw std::runtime_error(
-        "Accesing memory from a different context manager. Requesting ID " +
-        std::to_string(requested_lock_id) + " locked ID " +
-        std::to_string(get_lock_id()) + ".");
-
   // Access to internal data
-  T *data_ptr = this->ptr();
+  T *data_ptr = this->ptr(requested_lock_id);
 
   DLTensor dl_tensor;
   dl_tensor.data = data_ptr;
@@ -271,8 +257,10 @@ void MemArray<T, ndim>::read_numpy_array(
 }
 
 template <typename T, int ndim>
-const T
-MemArray<T, ndim>::operator()(const std::array<int, ndim> &indeces) const {
+const T MemArray<T, ndim>::operator()(const std::array<int, ndim> &indeces,
+                                      const int64_t requested_lock_id) const {
+  throw_invalid_lock_access(requested_lock_id);
+
   for (int i = 0; i < ndim; ++i)
     if (indeces[i] >= get_shape()[i])
       throw std::runtime_error("Invalid index for shape access");
@@ -284,7 +272,8 @@ MemArray<T, ndim>::operator()(const std::array<int, ndim> &indeces) const {
 
 template <typename T, int ndim>
 void MemArray<T, ndim>::write(const std::array<int, ndim> &indeces,
-                              const T &value) {
+                              const T &value, const int64_t requested_lock_id) {
+  throw_invalid_lock_access(requested_lock_id);
   for (int i = 0; i < ndim; ++i)
     if (indeces[i] >= get_shape()[i])
       throw std::runtime_error("Invalid index for write access");
