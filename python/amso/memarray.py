@@ -74,7 +74,7 @@ class MemArray:
                     stream,
                     requested_device_id,
                     self._lock_id,
-                    True,
+                    False,
                 )
             except Exception as exc:
                 raise BufferError(str(exc)) from exc
@@ -166,7 +166,7 @@ class MemArray:
         if device_id is None:
             device_id = current_device_id
 
-        self._cpp_obj._move_memory(device_type, stream, device_id, -1, True)
+        self._cpp_obj._move_memory(device_type, stream, device_id, -1, False)
 
         return self.DLPackWrapper(int(uuid.uuid4()), self._cpp_obj)
 
@@ -178,7 +178,7 @@ class MemArray:
         device_type: amso_dlpack.DLDeviceType,
         device_id: int | None = None,
         stream: int = 0,
-        async_copy: bool = True,
+        async_copy: bool = False,
     ):
 
         if device_id is None:

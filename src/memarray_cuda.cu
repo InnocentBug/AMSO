@@ -15,6 +15,7 @@ add_index_kernel(T *data, typename MemArray<T, ndim>::ArrayIndexer indexer) {
     int index_sum = cuda::std::accumulate(indices.begin(), indices.end(), 0,
                                           cuda::std::plus<int>());
     data[idx] += static_cast<T>(index_sum);
+    // printf("%d %d %d\n", indices[0], index_sum, data[idx]);
   }
 }
 

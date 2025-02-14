@@ -141,6 +141,11 @@ void MemArray<T, ndim>::move_memory(const DLDeviceType requested_device_type,
 
   const cudaStream_t stream =
       convert_python_int_to_stream(requested_cuda_stream_id);
+
+  if (not async) {
+    cudaStreamSynchronize(stream);
+  }
+
   thrust::device_event event;
   // Memory movement
   switch (requested_device_type) {
@@ -151,7 +156,6 @@ void MemArray<T, ndim>::move_memory(const DLDeviceType requested_device_type,
     event = thrust::async::copy(thrust::host, thrust::cuda::par.on(stream),
                                 _host_vec.begin(), _host_vec.end(),
                                 _device_vec.begin());
-
     _on_device = true;
     break;
   case kDLCPU:
@@ -168,8 +172,10 @@ void MemArray<T, ndim>::move_memory(const DLDeviceType requested_device_type,
                              std::to_string(requested_device_type) + ".");
   }
 
-  if (not async)
+  if (not async) {
     event.wait();
+    cudaStreamSynchronize(stream);
+  }
 }
 
 template <typename T, int ndim>
@@ -243,7 +249,7 @@ template <typename T, int ndim>
 void MemArray<T, ndim>::read_numpy_array(
     pybind11::array_t<T, pybind11::array::c_style | pybind11::array::forcecast>
         np_array) {
-  move_memory(kDLCPU, 0, get_device_id(), -1, false);
+  move_memory(kDLCPU, 0, get_device_id(), -1, true);
   pybind11::buffer_info buf = np_array.request();
 
   if (buf.ndim != ndim)

@@ -1,3 +1,5 @@
+import time
+
 import amso
 import numpy as np
 import pytest
@@ -30,7 +32,7 @@ def get_numpy_ref_array(shape, dtype):
         for x in range(shape[0]):
             for y in range(shape[1]):
                 for z in range(shape[2]):
-                    np_arr[x, y] += x + y + z
+                    np_arr[x, y, z] += x + y + z
     else:
         raise RuntimeError("Test only valid for dimension, 1, 2, 3")
 
@@ -49,7 +51,7 @@ def get_numpy_ref_array(shape, dtype):
             1,
             1,
         ),
-        (14, 15, 16),
+        (4, 5, 6),
         (134, 126, 180),
     ],
 )
@@ -71,15 +73,17 @@ def test_memarray(shape, dtype):
     mem_array.move_memory(amso_dlpack.kDLCUDA)
     init_array = get_init_array(shape, dtype)
 
-    mem_array.read_numpy_array(local_array)
+    mem_array.read_numpy_array(init_array)
+    mem_array.move_memory(amso_dlpack.kDLCUDA)
 
     # Run the CUDA kernel
     mem_array.add_index_tuple()
+    mem_array.move_memory(amso_dlpack.kDLCPU)
 
     # Access the result and transfer it to CPU
     with mem_array.get_dlpack(amso_dlpack.kDLCPU) as dlpack:
         dlpack_array = np.from_dlpack(dlpack)
 
-    # Do the same, what you expect the CUDA kernel to in numpy
-    ref_array = get_numpy_ref_array(shape, dtype)
-    np.allclose(dlpack_array, ref_array)
+        # Do the same, what you expect the CUDA kernel to in numpy
+        ref_array = get_numpy_ref_array(shape, dtype)
+        assert np.allclose(dlpack_array, ref_array)

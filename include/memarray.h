@@ -30,6 +30,11 @@ make_std_cuda_array(const cuda::std::array<T, ndim> &cuda_std_arr) {
 }
 } // namespace detail
 
+template <typename T, int ndim> class MemArray;
+
+template <typename T, int ndim>
+void swap(MemArray<T, ndim> &lhs, MemArray<T, ndim> &rhs) noexcept;
+
 template <typename T, int ndim> class MemArray {
 private:
   thrust::host_vector<T> _host_vec;
@@ -89,7 +94,43 @@ public:
   };
 
 public:
-  MemArray(const std::array<int, ndim> &shape, int device_id);
+  MemArray(const std::array<int, ndim> &shape,
+           int device_id);                 // Regular constructor for new memory
+  ~MemArray(){};                           // Destructor
+  MemArray(const MemArray<T, ndim> &other) // Copy constructor (expensive)
+      : _host_vec(other._host_vec), _device_vec(other._device_vec),
+        _shape(other._shape), _size(other._size), _on_device(other._on_device),
+        _device_id(other._device_id), _lock_id(other._lock_id) {}
+
+  void swap(MemArray<T, ndim> &other) noexcept {
+    using std::swap;
+    swap(_host_vec, other._host_vec);
+    swap(_device_vec, other._device_vec);
+    swap(_shape, other._shape);
+    swap(_size, other._size);
+    swap(_on_device, other._on_device);
+    swap(_device_id, other._device_id);
+    swap(_lock_id, other._lock_id);
+  } // Efficient swap (cheap)
+  template <typename U, int N>
+  friend void swap(MemArray<U, N> &lhs, MemArray<U, N> &rhs) noexcept;
+
+  MemArray(MemArray<T, ndim> &&other) noexcept { // Move constructor (cheap)
+    this->swap(other);
+  }
+
+  MemArray<T, ndim> &
+  operator=(const MemArray<T, ndim> &other) { // Copy Assignment operator
+    MemArray<T, ndim> temp(other);
+    this->swap(temp);
+    return *this;
+  }
+
+  MemArray<T, ndim> &
+  operator=(MemArray<T, ndim> &&other) noexcept { // Move Assignment operator
+    this->swap(other);
+    return *this;
+  }
 
   int get_device_id() const { return _device_id; }
   const std::array<int, ndim> &get_shape() const { return _shape; }
@@ -138,6 +179,10 @@ public:
 
   ArrayIndexer get_indexer() const { return ArrayIndexer(get_shape()); }
 };
+template <typename T, int ndim>
+void swap(MemArray<T, ndim> &lhs, MemArray<T, ndim> &rhs) noexcept {
+  lhs.swap(rhs);
+}
 
 } // namespace amso
 
