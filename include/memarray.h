@@ -41,7 +41,6 @@ private:
   thrust::device_vector<T> _device_vec;
 
   std::array<int, ndim> _shape;
-  int64_t _size;
   bool _on_device;
   int _device_id;
   int64_t _lock_id; // Context manager lock, ID. Negative means unlocked.
@@ -99,7 +98,7 @@ public:
   ~MemArray(){};                           // Destructor
   MemArray(const MemArray<T, ndim> &other) // Copy constructor (expensive)
       : _host_vec(other._host_vec), _device_vec(other._device_vec),
-        _shape(other._shape), _size(other._size), _on_device(other._on_device),
+        _shape(other._shape), _on_device(other._on_device),
         _device_id(other._device_id), _lock_id(other._lock_id) {}
 
   void swap(MemArray<T, ndim> &other) noexcept {
@@ -107,7 +106,6 @@ public:
     swap(_host_vec, other._host_vec);
     swap(_device_vec, other._device_vec);
     swap(_shape, other._shape);
-    swap(_size, other._size);
     swap(_on_device, other._on_device);
     swap(_device_id, other._device_id);
     swap(_lock_id, other._lock_id);
@@ -134,7 +132,10 @@ public:
 
   int get_device_id() const { return _device_id; }
   const std::array<int, ndim> &get_shape() const { return _shape; }
-  int64_t get_size() const { return _size; }
+  int64_t get_size() const {
+    assert(_host_vec.size() == _device_vec.size());
+    return _host_vec.size();
+  }
   bool get_on_device() const { return _on_device; }
   int64_t get_lock_id() const { return _lock_id; }
   void throw_invalid_lock_access(const int64_t requested_lock_id) const {

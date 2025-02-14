@@ -71,8 +71,7 @@ template <typename tensor_ptr_type> void dl_capsule_deleter(PyObject *capsule) {
 
 template <typename T, int ndim>
 MemArray<T, ndim>::MemArray(const std::array<int, ndim> &shape, int device_id)
-    : _shape({0}), _size(0), _on_device(false), _device_id(device_id),
-      _lock_id(-1) {
+    : _shape({0}), _on_device(false), _device_id(device_id), _lock_id(-1) {
 
   for (auto shape_element : shape) {
     if (shape_element <= 0) {
@@ -95,7 +94,6 @@ MemArray<T, ndim>::MemArray(const std::array<int, ndim> &shape, int device_id)
   _host_vec = thrust::host_vector<T>(size);
   _device_vec = thrust::device_vector<T>(size);
 
-  _size = size;
   _shape = shape;
 }
 
