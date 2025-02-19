@@ -8,14 +8,15 @@ namespace amso {
 
 template <typename T, int ndim>
 __global__ void
-add_index_kernel(T *data, typename MemArray<T, ndim>::ArrayIndexer indexer) {
+add_index_kernel(const typename MemArray<T, ndim>::ArrayIndexer indexer) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < indexer.size()) {
     auto indices = indexer.get_indices(idx);
     int index_sum = cuda::std::accumulate(indices.begin(), indices.end(), 0,
                                           cuda::std::plus<int>());
-    data[idx] += static_cast<T>(index_sum);
-    // printf("%d %d %d\n", indices[0], index_sum, data[idx]);
+    const int new_idx = indexer(indices);
+    *indexer.get(new_idx) += static_cast<T>(index_sum);
+    // printf("%d %d %d\n", indices[0], index_sum, *indexer.get(idx));
   }
 }
 
@@ -51,7 +52,7 @@ void add_index_tuple(MemArray<T, ndim> &arr, const int64_t stream) {
   // Launch the kernel with calculated configuration
   add_index_kernel<T, ndim>
       <<<gridSize, blockSize, 0, reinterpret_cast<cudaStream_t>(stream)>>>(
-          arr.ptr(), indexer);
+          indexer);
 
   // Check for kernel launch errors
   cudaError_t err = cudaGetLastError();

@@ -52,29 +52,37 @@ private:
 public:
   static constexpr int NDIM = ndim;
   class ArrayIndexer {
+    friend class MemArray;
+
   private:
+    T *const _ptr = nullptr;
     const cuda::std::array<int, ndim> _shape;
 
-  public:
-    inline ArrayIndexer(const std::array<int, ndim> &shape)
-        : _shape(detail::make_cuda_std_array<int, ndim>(shape)) {
+    ArrayIndexer() = delete;
+    inline ArrayIndexer(T *ptr, const std::array<int, ndim> &shape)
+        : _ptr(ptr), _shape(detail::make_cuda_std_array<int, ndim>(shape)) {
       for (auto s : shape)
         assert(s > 0);
     }
 
+  public:
+    __host__ __device__ inline T *get(const int offset = 0) const noexcept {
+      return _ptr + offset;
+    }
+
     __host__ __device__ inline int
-    operator()(const cuda::std::array<int, ndim> &indeces) const {
+    operator()(const cuda::std::array<int, ndim> &indices) const {
       int index = 0;
       int stride = 1;
       for (int i = ndim - 1; i >= 0; --i) {
-        assert(indeces[i] < _shape[i]);
-        index += indeces[i] * stride;
+        assert(indices[i] < _shape[i]);
+        index += indices[i] * stride;
         stride *= _shape[i];
       }
       return index;
     }
-    __host__ inline int operator()(const std::array<int, ndim> &indeces) const {
-      return this->operator()(detail::make_cuda_std_array<int, ndim>(indeces));
+    __host__ inline int operator()(const std::array<int, ndim> &indices) const {
+      return this->operator()(detail::make_cuda_std_array<int, ndim>(indices));
     }
 
     __host__ __device__ inline cuda::std::array<int, ndim>
@@ -160,7 +168,7 @@ public:
   pybind11::capsule get_dlpack_tensor(const bool versioned,
                                       const int64_t requested_lock_id);
 
-  std::pair<DLDeviceType, int32_t> get_dlpack_device() const;
+  std::pair<DLDeviceType, int32_t> get_dlpack_device() const noexcept;
 
   // Context manager methods
   void enter(const int64_t lock_id) {
@@ -179,19 +187,19 @@ public:
                             np_array);
 
   // encaspulated access access, not zero-overhead
-  const T operator()(const std::array<int, ndim> &indeces,
+  const T operator()(const std::array<int, ndim> &indices,
                      const int64_t requested_lock_id = -1) const;
-  const T operator()(const cuda::std::array<int, ndim> &indeces,
+  const T operator()(const cuda::std::array<int, ndim> &indices,
                      const int64_t requested_lock_id = -1) const {
-    return this->operator()(detail::make_std_cuda_array<int, ndim>(indeces),
+    return this->operator()(detail::make_std_cuda_array<int, ndim>(indices),
                             requested_lock_id);
   }
 
-  void write(const std::array<int, ndim> &indeces, const T &value,
+  void write(const std::array<int, ndim> &indices, const T &value,
              const int64_t requested_lock_id = -1);
-  void write(const cuda::std::array<int, ndim> &indeces, const T &value,
+  void write(const cuda::std::array<int, ndim> &indices, const T &value,
              const int64_t requested_lock_id = -1) {
-    return this->write(detail::make_std_cuda_array<int, ndim>(indeces), value,
+    return this->write(detail::make_std_cuda_array<int, ndim>(indices), value,
                        requested_lock_id);
   }
 
@@ -205,10 +213,15 @@ public:
     return _host_vec.data();
   }
   const T *ptr(const int64_t requested_lock_id = -1) const {
-    return const_cast<const T *>(this->ptr(requested_lock_id));
+    return const_cast<const T *>(
+        const_cast<MemArray *>(this)->ptr(requested_lock_id));
   }
 
-  ArrayIndexer get_indexer() const { return ArrayIndexer(get_shape()); }
+  ArrayIndexer get_indexer(const int64_t requested_lock_id = -1) {
+    auto ptr = this->ptr(requested_lock_id);
+    auto shape = get_shape();
+    return ArrayIndexer(ptr, shape);
+  }
 };
 template <typename T, int ndim>
 void swap(MemArray<T, ndim> &lhs, MemArray<T, ndim> &rhs) noexcept {

@@ -12,12 +12,7 @@
 namespace amso {
 
 namespace detail {
-template <typename T> struct TypeToDLPackCode {
-  static constexpr DLDataTypeCode code = kDLOpaqueHandle;
-  static constexpr uint8_t bits = 8 * sizeof(T);
-  static constexpr uint8_t lanes = 1;
-};
-
+template <typename T> struct TypeToDLPackCode;
 template <> struct TypeToDLPackCode<int32_t> {
   static constexpr DLDataTypeCode code = kDLInt;
   static constexpr uint8_t bits = 8 * sizeof(int32_t);
@@ -179,17 +174,18 @@ MemArray<T, ndim>::get_dlpack_tensor(const bool versioned,
 
   DLTensor dl_tensor;
   dl_tensor.data = data_ptr;
-  dl_tensor.shape = new int64_t[ndim]; // Throws std::bad_alloc on failure
-  std::copy(get_shape().begin(), get_shape().end(),
-            dl_tensor.shape); // Init with correct shape
 
   auto device_pair = get_dlpack_device();
   dl_tensor.device.device_type = device_pair.first;
   dl_tensor.device.device_id = device_pair.second;
-  dl_tensor.ndim = ndim;
   dl_tensor.dtype = DLDataType{detail::TypeToDLPackCode<T>::code,
                                detail::TypeToDLPackCode<T>::bits,
                                detail::TypeToDLPackCode<T>::lanes};
+  dl_tensor.ndim = ndim;
+  auto shape_ptr = std::make_unique<int64_t[]>(ndim);
+  dl_tensor.shape = shape_ptr.get();
+  std::copy(get_shape().begin(), get_shape().end(),
+            dl_tensor.shape); // Init with correct shape
   dl_tensor.strides = nullptr;
   dl_tensor.byte_offset = 0;
 
@@ -206,6 +202,7 @@ MemArray<T, ndim>::get_dlpack_tensor(const bool versioned,
 
     // Release unique pointer to capsule, as we transfer ownership to the
     // python capsule.
+    shape_ptr.release();
     return pybind11::capsule(
         versioned_tensor.release(), "dltensor",
         &detail::dl_capsule_deleter<DLManagedTensorVersioned *>);
@@ -217,13 +214,15 @@ MemArray<T, ndim>::get_dlpack_tensor(const bool versioned,
 
     // Release unique pointer to capsule, as we transfer ownership to the
     // python capsule.
+    shape_ptr.release();
     return pybind11::capsule(tensor.release(), "dltensor",
                              &detail::dl_capsule_deleter<DLManagedTensor *>);
   }
 }
 
 template <typename T, int ndim>
-std::pair<DLDeviceType, int32_t> MemArray<T, ndim>::get_dlpack_device() const {
+std::pair<DLDeviceType, int32_t>
+MemArray<T, ndim>::get_dlpack_device() const noexcept {
   if (get_on_device())
     return std::make_pair(DLDeviceType::kDLCUDA, get_device_id());
   return std::make_pair(DLDeviceType::kDLCPU, 0);
@@ -255,31 +254,32 @@ void MemArray<T, ndim>::read_numpy_array(
 }
 
 template <typename T, int ndim>
-const T MemArray<T, ndim>::operator()(const std::array<int, ndim> &indeces,
+const T MemArray<T, ndim>::operator()(const std::array<int, ndim> &indices,
                                       const int64_t requested_lock_id) const {
-  throw_invalid_lock_access(requested_lock_id);
+  // Generally, indexers are only non-const to MemArray, bc they contain a raw
+  // pointer But here we know, that we only read from that pointer
+  auto indexer = const_cast<MemArray *>(this)->get_indexer(requested_lock_id);
 
   for (int i = 0; i < ndim; ++i)
-    if (indeces[i] >= get_shape()[i])
+    if (indices[i] >= get_shape()[i])
       throw std::runtime_error("Invalid index for shape access");
-  auto indexer = ArrayIndexer(get_shape());
   if (get_on_device())
-    return _device_vec[indexer(indeces)];
-  return _host_vec[indexer(indeces)];
+    return _device_vec[indexer(indices)];
+  return _host_vec[indexer(indices)];
 }
 
 template <typename T, int ndim>
-void MemArray<T, ndim>::write(const std::array<int, ndim> &indeces,
+void MemArray<T, ndim>::write(const std::array<int, ndim> &indices,
                               const T &value, const int64_t requested_lock_id) {
-  throw_invalid_lock_access(requested_lock_id);
+  auto indexer = this->get_indexer(requested_lock_id);
   for (int i = 0; i < ndim; ++i)
-    if (indeces[i] >= get_shape()[i])
+    if (indices[i] >= get_shape()[i])
       throw std::runtime_error("Invalid index for write access");
-  auto indexer = ArrayIndexer(get_shape());
+
   if (get_on_device())
-    _device_vec[indexer(indeces)] = value;
+    _device_vec[indexer(indices)] = value;
   else
-    _host_vec[indexer(indeces)] = value;
+    _host_vec[indexer(indices)] = value;
 }
 
 template <typename MemArrayType>
