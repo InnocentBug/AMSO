@@ -1,3 +1,7 @@
-from ._amso import print_platform_info
+from ._amso import dlpack
+from .memarray import MemArray
 
-__all__ = ["print_platform_info"]
+__all__ = [
+    "MemArray",
+    "dlpack",
+]

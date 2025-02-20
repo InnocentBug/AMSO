@@ -1,22 +1,10 @@
-find_package(
-  Python
-  COMPONENTS Interpreter Development Development.Module
-  REQUIRED)
-
-set(PYBIND11_NEWPYTHON ON)
-
-# Pybind11
-cpmaddpackage(NAME pybind11 GITHUB_REPOSITORY pybind/pybind11 VERSION 2.10.0)
-
 # Define the Python module
-pybind11_add_module(_amso pybind_module.cpp)
+pybind11_add_module(_amso module_amso.cpp)
 
 # Link against your main library
-target_link_libraries(_amso PUBLIC amso_core pybind11::module Python::Python)
+target_link_libraries(_amso PUBLIC amso_core)
+target_link_libraries(_amso PRIVATE pybind11::pybind11 CUDA::cudart)
+set_target_properties(_amso PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Install the compiled Python module
 install(TARGETS _amso LIBRARY DESTINATION amso)
-install(TARGETS amso_core LIBRARY DESTINATION amso)
-
-# Install the pure Python files
-install(DIRECTORY amso/ DESTINATION amso)
